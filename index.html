@@ -1,0 +1,2106 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title></title>
+
+  <!-- Шрифт -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind (Play CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // ID REZEDA — фирменная палитra
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            air: "#FFFFFF",       // ВОЗДУХ — белый, пространство
+            steel: "#F2F2F2",     // СТАЛЬ — светло-серый, структура
+            concrete: "#D9D9D9",  // БЕТОН — серый, фактура/границы
+            night: "#000000",     // НОЧЬ — чёрный, контраст
+            ink: "#000000",       // основной текст
+            sun: "#F7FF1D",       // ЯРКОЕ СОЛНЦЕ — неон-жёлтый акцент (дозированно)
+            dawn: "#FFA352",      // РАССВЕТ — тёпло-оранжевый (редко)
+            lilac: "#C4A2F7",     // СИБИРСКАЯ СИРЕНЬ — светлая
+            grape: "#916BD8",     // СИБИРСКАЯ СИРЕНЬ 02 — глубокая
+            // алиасы для совместимости со старой разметкой
+            bg: "#F2F2F2",
+            accent: "#C4A2F7",
+            accentSoft: "#916BD8",
+          },
+          fontFamily: {
+            sans: ["Inter", "system-ui", "sans-serif"],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- React + Babel -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- ВАЖНО: версия Babel зафиксирована (7.23.5). Без пина unpkg отдаёт свежую
+       сборку, которая по умолчанию использует automatic-runtime и вставляет
+       `import {jsx} from "react/jsx-runtime"` → «Cannot use import statement» → белый экран. -->
+  <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
+
+  <style>
+    html { scroll-behavior: smooth; }
+    /* Базовый текст — Inter Light (фирменный наборный шрифт) */
+    body { background: #F2F2F2; color: #000; font-weight: 300; }
+
+    /* Заголовки — Inter Regular (фирменный шрифт для заголовков) */
+    h1, h2, h3, h4, h5 { font-weight: 400; letter-spacing: -0.01em; }
+
+    /* Без скруглений — везде прямые углы (архитектурная строгость бренда) */
+    *, *::before, *::after { border-radius: 0 !important; }
+
+    /* Плавное появление карточек */
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-up { animation: fadeUp .5s ease both; }
+
+    /* Hairline-границы вместо теней — плоский, модульный язык бренда */
+    .hair { border: 1px solid #D9D9D9; }
+
+    /* Анимация роста баров */
+    .bar-fill { transition: width .7s cubic-bezier(.22,1,.36,1); }
+
+    /* ===== Печать / экспорт в PDF (бюджет — не более 4 страниц A4) ===== */
+    @media print {
+      @page { size: A4 portrait; margin: 10mm; }
+      html { zoom: 1; }
+      body { background: #fff; }
+
+      /* Печатаем только табличный макет КП, экранный интерфейс прячем */
+      .screen-only { display: none !important; }
+      .print-only { display: block !important; }
+
+      /* Сохраняем цвета чёрных блоков и тёмной панели итога в PDF
+         (по умолчанию браузер убирает фоновые заливки при печати) */
+      *, *::before, *::after {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+      }
+
+      .no-print { display: none !important; }
+      .fade-up { animation: none !important; }
+
+      /* Прячем то, что раздувает объём при печати */
+      .print-hide { display: none !important; }
+
+      /* Карточки — компактнее, не рвём между страницами */
+      .print-block { break-inside: avoid; page-break-inside: avoid; box-shadow: none !important; border: 1px solid #ccc; }
+      .sticky-summary { position: static !important; }
+      .print-mt { margin-top: 0 !important; }
+
+      /* Сжимаем отступы и интервалы */
+      .print-tight { padding: 10px 14px !important; }
+      .print-gap { gap: 10px !important; }
+      .print-space > * + * { margin-top: 10px !important; }
+      .print-pb { padding-bottom: 12px !important; }
+      a[href]:after { content: ""; }
+
+      /* Свёрнутые секции — в печати раскрываем принудительно */
+      .acc-body.closed { display: block !important; }
+    }
+
+    /* Аккордеон: тело скрыто в закрытом состоянии (на экране) */
+    .acc-body.closed { display: none; }
+
+    /* Печатный макет КП — виден только при печати */
+    .print-only { display: none; }
+  </style>
+</head>
+<body class="font-sans antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    /* @jsxRuntime classic */
+    // ВАЖНО: classic-runtime (React.createElement). Без этой прагмы свежие версии
+    // @babel/standalone используют automatic-runtime и вставляют `import ... from
+    // "react/jsx-runtime"`, из-за чего страница падает с «Cannot use import statement».
+    const { useState, useMemo, useRef, useEffect } = React;
+
+    /* =========================================================================
+       КОНФИГ ЦЕН (все цифры — редактируемые константы, рубли)
+       ========================================================================= */
+    const PRICING = {
+      // Блок 1 — Архитектурная визуализация (экстерьер)
+      b1: {
+        modelingPerBuilding: 12000, // моделирование 1 корпуса
+        viewMedium: 10000,          // 1 ракурс, средний уровень (D5/Twinmotion), день
+        viewHigh: 21500,            // 1 ракурс, высший уровень (3ds Max + ИИ), день
+      },
+      // Блок 2 — Архитектурно-маркетинговая модель (цена от площади модели)
+      b2: {
+        minPrice: 55000,            // минимальная (базовая) стоимость модели
+        baseRate: 300,              // стартовая ставка ₽/м² (при малой площади)
+        decay: 1400,               // чем больше площадь, тем ниже эффективная ставка (м²)
+      },
+      // Блок 3 — Визуализация интерьера
+      b3: {
+        frameMedium: 8000,          // кадр, средний уровень
+        frameHigh: 14000,           // кадр, высший уровень
+        minOrder: 10000,
+      },
+      // Блок 4 — 3D видео-ролик (цена от длительности)
+      b4: {
+        renderPerSec: 1700,         // вариант А: классический рендер, ₽/сек
+        aiPerSec: 500,              // вариант Б: ИИ-пролёты, ₽/сек
+      },
+    };
+
+    // Длительности ролика для блока 4
+    const DURATIONS = [
+      { key: "10s", label: "10 секунд", sec: 10 },
+      { key: "30s", label: "30 секунд", sec: 30 },
+      { key: "1m", label: "1 минута", sec: 60 },
+      { key: "2m", label: "2 минуты", sec: 120 },
+    ];
+    const durSec = (key) => (DURATIONS.find((d) => d.key === key)?.sec ?? 30);
+    const durLabel = (key) => (DURATIONS.find((d) => d.key === key)?.label ?? key);
+
+    // Сроки выполнения презентационных блоков (раб. дн.) — редактируемые ставки
+    const DAYS = {
+      b1: { base: 2, perTower: 1, perViewMedium: 1, perViewHigh: 2 },   // экстерьер
+      b2: { base: 4, per1000sqm: 1.5 },                                  // модель
+      b3: { base: 2, perFrameMedium: 1, perFrameHigh: 1.5 },            // интерьер-виз
+      b4: { base: 3, perSecRender: 0.3, perSecAi: 0.12 },             // видео-ролик
+    };
+
+    /* =========================================================================
+       ВСПОМОГАТЕЛЬНОЕ
+       ========================================================================= */
+    const EX = "examples/"; // папка с фото-примерами (рядом с index.html)
+
+    // Формат рублей с разделением разрядов пробелом: 12 000 ₽
+    const rub = (n) =>
+      Math.round(n).toLocaleString("ru-RU").replace(/ /g, " ") + " ₽";
+
+    /* =========================================================================
+       РАСЧЁТ КОЛИЧЕСТВА (рекомендации) — чистые функции от параметров проекта
+       ========================================================================= */
+    const recommend = {
+      // Б1: 2 (общий + входная группа) + 1×корпус + (1 если площадь > 10 000), мин. 3
+      b1: (p) => Math.max(3, 2 + (Number(p.towers) || 0) + ((Number(p.area) || 0) > 10000 ? 1 : 0)),
+      // Б3: 3 базовых + 1 × число типов планировок (прокси — число корпусов), мин. 3
+      b3: (p) => Math.max(3, 3 + (Number(p.towers) || 0)),
+    };
+
+    /* =========================================================================
+       МНОЖИТЕЛИ СЛОЖНОСТИ ПРОЕКТА (влияют на стоимость всех блоков)
+       ========================================================================= */
+    const clamp = (min, max, v) => Math.max(min, Math.min(max, v));
+
+    // Тип объекта: разная сложность подачи и детализации
+    const TYPE_FACTOR = {
+      "Жилой комплекс": 1.0,
+      "Апартаменты": 1.05,
+      "Коттеджный посёлок": 0.85,
+      "Коммерческая / ритейл": 1.15,
+      "Многофункциональный (mixed-use)": 1.25,
+    };
+
+    // Этажность — 3 диапазона (ключ хранится в params.floors)
+    const FLOOR_BANDS = [
+      { key: "low", label: "До 5 эт.", factor: 0.9 },
+      { key: "mid", label: "5–20 эт.", factor: 1.0 },
+      { key: "high", label: "20+ эт.", factor: 1.25 },
+    ];
+    const floorFactor = (key) => (FLOOR_BANDS.find((b) => b.key === key)?.factor ?? 1);
+
+    // Общий множитель = тип × площадь × этажность.
+    // Площадь — самый сильный фактор: непрерывный рост от 0,8× до 2,5×.
+    const globalFactor = (p) =>
+      (TYPE_FACTOR[p.objectType] ?? 1) *
+      clamp(0.8, 2.5, 0.8 + (Number(p.area) || 0) / 40000) *
+      floorFactor(p.floors);
+
+    /* =========================================================================
+       РАСЧЁТ ЦЕНЫ БЛОКА — чистые функции (база × множитель сложности проекта)
+       ========================================================================= */
+    const priceOf = {
+      // Б1 = моделирование всех корпусов + (цена за ракурс × кол-во ракурсов)
+      b1: (opt, count, p) => {
+        const modeling = PRICING.b1.modelingPerBuilding * (Number(p.towers) || 0);
+        const per = opt === "high" ? PRICING.b1.viewHigh : PRICING.b1.viewMedium;
+        return (modeling + per * count) * globalFactor(p);
+      },
+      // Б2: цена от ОТДЕЛЬНО введённой площади модели (без общего множителя)
+      b2: (area) => {
+        const a = parseInt(area || 0, 10);
+        if (a <= 0) return 0;
+        const { minPrice, baseRate, decay } = PRICING.b2;
+        // База + площадь со снижающейся ставкой: при росте площади ₽/м² падает.
+        return Math.round(minPrice + (baseRate * a) / (1 + a / decay));
+      },
+      // Б3: цена за кадр × кол-во, но не меньше минимального заказа
+      b3: (opt, count, p) => {
+        const per = opt === "high" ? PRICING.b3.frameHigh : PRICING.b3.frameMedium;
+        return Math.max(PRICING.b3.minOrder, per * count) * globalFactor(p);
+      },
+      // Б4: цена от длительности ролика (А — классический рендер, Б — ИИ-пролёты).
+      // Если модель НЕ предоставляется заказчиком — добавляем стоимость маркетинговой
+      // модели, рассчитанную по площади из исходных данных проекта (p.area), а не из b2.
+      b4: (opt, durationKey, p, clientModel) => {
+        const per = opt === "A" ? PRICING.b4.renderPerSec : PRICING.b4.aiPerSec;
+        let price = per * durSec(durationKey) * globalFactor(p);
+        if (!clientModel) price += priceOf.b2(p.area);
+        return price;
+      },
+    };
+
+    // Единая точка расчёта цены блока по его состоянию
+    const blockPrice = (id, st, p) => {
+      if (id === "b1") return priceOf.b1(st.opt, st.count, p);
+      if (id === "b2") return priceOf.b2(st.area);
+      if (id === "b3") return priceOf.b3(st.opt, st.count, p);
+      if (id === "b4") return priceOf.b4(st.opt, st.dur, p, st.clientModel);
+      return 0;
+    };
+
+    /* =========================================================================
+       РАСЧЁТ СРОКОВ БЛОКА (раб. дн.) — по аналогии с интерьерными сроками
+       ========================================================================= */
+    const daysOf = {
+      b1: (opt, count, p) =>
+        DAYS.b1.base + (Number(p.towers) || 0) * DAYS.b1.perTower +
+        count * (opt === "high" ? DAYS.b1.perViewHigh : DAYS.b1.perViewMedium),
+      b2: (area) => {
+        const a = parseInt(area || 0, 10);
+        return a > 0 ? DAYS.b2.base + (a / 1000) * DAYS.b2.per1000sqm : 0;
+      },
+      b3: (opt, count) =>
+        DAYS.b3.base + count * (opt === "high" ? DAYS.b3.perFrameHigh : DAYS.b3.perFrameMedium),
+      b4: (opt, durationKey, p, clientModel) => {
+        let d = DAYS.b4.base + durSec(durationKey) * (opt === "A" ? DAYS.b4.perSecRender : DAYS.b4.perSecAi);
+        // если модель не предоставляется заказчиком — добавляем время на её построение
+        if (!clientModel) d += daysOf.b2(p.area);
+        return d;
+      },
+    };
+
+    // Единая точка расчёта срока блока (раб. дн., округление вверх)
+    const blockDays = (id, st, p) => {
+      let d = 0;
+      if (id === "b1") d = daysOf.b1(st.opt, st.count, p);
+      else if (id === "b2") d = daysOf.b2(st.area);
+      else if (id === "b3") d = daysOf.b3(st.opt, st.count, p);
+      else if (id === "b4") d = daysOf.b4(st.opt, st.dur, p, st.clientModel);
+      return Math.ceil(d);
+    };
+
+    // Эффективный срок блока: ручной ввод (st.manualDays) имеет приоритет над авторасчётом
+    const effBlockDays = (id, st, p) =>
+      st.manualDays != null ? st.manualDays : blockDays(id, st, p);
+
+    // Эффективная стоимость блока: ручная цена (st.manualPrice) имеет приоритет
+    const effBlockPrice = (id, st, p) =>
+      st.manualPrice != null ? st.manualPrice : blockPrice(id, st, p);
+
+    /* =========================================================================
+       КОНТЕНТ БЛОКОВ (тексты, статистика, инфографика, фото)
+       ========================================================================= */
+    const BLOCKS = [
+      {
+        id: "b1",
+        kicker: "Блок 1",
+        title: "Архитектурная визуализация",
+        subtitle: "Экстерьер · фотореалистичные рендеры архитектуры с окружением",
+        unitLabel: "ракурсов",
+        toggleLabel: "Уровень качества",
+        options: {
+          medium: {
+            name: "Средний",
+            tag: "D5 Render / Twinmotion",
+            desc: "Real-time движки. Быстро и дешевле, хороший результат для типовых ракурсов и большого объёма. Меньше тонкого контроля света и атмосферы.",
+            impact: "−20% время на рынке · +35% лидов",
+          },
+          high: {
+            name: "Высший",
+            tag: "3ds Max (Corona / V-Ray) + ИИ-постобработка",
+            desc: "Создаётся фотореалистичная визуализация с учётом освещённости, материалов и антуража (люди, машины, ландшафт, время суток). Кинематографичная подача — «обложка проекта».",
+            impact: "−35% время на рынке · +49% лидов",
+          },
+        },
+        diff:
+          "Real-time движки (D5/Twinmotion) дают качественную картинку за меньшие деньги и сроки — оптимально для рабочих ракурсов и большого объёма. 3ds Max + ИИ-постобработка — это премиальная подача: точный свет, фактуры и атмосфера, которые формируют эмоцию и продают мечту. Чем дороже и сложнее объект — тем сильнее окупается высший уровень.",
+        stats: [
+          { big: "30–50%", text: "быстрее продаются объекты с качественной 3D-визуализацией (US-девелоперы)" },
+          { big: "+49%", text: "больше запросов у объявлений с 3D-визуализацией" },
+          { big: "31%", text: "быстрее продажи в РФ; конверсия выше до 68%, цикл сделки — до 2× короче" },
+          { big: "85%", text: "юнитов продано за 3 мес. до сдачи — кейс ЖК с детальными рендерами и 360°-туром" },
+        ],
+        bars: [
+          { title: "Время на рынке", note: "меньше — лучше", items: [["Без визуализации", 100], ["Средний", 80], ["Высший", 65]] },
+          { title: "Запросы / лиды", note: "по отраслевым данным", items: [["Без визуализации", 100], ["Средний", 135], ["Высший", 149]] },
+        ],
+        photos: {
+          medium: ["block1-medium-1.jpg", "block1-medium-2.jpg"],
+          high: ["block1-high-1.jpg", "block1-high-2.jpg"],
+        },
+      },
+      {
+        id: "b2",
+        mode: "area", // без переключателя и количества — только площадь модели
+        kicker: "Блок 2",
+        title: "Архитектурно-маркетинговая модель",
+        subtitle: "Изометрия-разрез комплекса с зонами, метражами и потоками движения",
+        single: {
+          tag: "Статичная аксонометрия-инфографика",
+          desc: "Создаётся изометрия-разрез комплекса с подписями зон, площадей и функционала. Идеален для презентаций, буклетов и стенда в отделе продаж.",
+          impact: "+30% к просмотрам объявления",
+        },
+        diff:
+          "Аксонометрия-инфографика мгновенно объясняет логику проекта «с высоты птичьего полёта» — где двор, где коммерция, где входы, какие площади и потоки движения. Идеальна для презентаций, буклетов и стенда в отделе продаж.",
+        photos: ["block2-medium-1.jpg", "block2-medium-2.jpg"],
+      },
+      {
+        id: "b3",
+        kicker: "Блок 3",
+        title: "Визуализация интерьера",
+        subtitle: "Лобби, входные группы, типовые квартиры и МОПы — клиент «проживает» пространство",
+        unitLabel: "ракурсов",
+        toggleLabel: "Уровень качества",
+        options: {
+          medium: {
+            name: "Средний",
+            tag: "D5 Render / Twinmotion + ИИ-стейджинг",
+            desc: "Быстрая меблировка и подача интерьера, несколько стилей за короткий срок под разные аудитории.",
+            impact: "−42% время на рынке · +15% цена",
+          },
+          high: {
+            name: "Высший",
+            tag: "3ds Max (Corona / V-Ray) + ИИ-постобработка",
+            desc: "Фотореалистичные интерьеры с точным светом, текстурами и декором — уровень журнальной съёмки.",
+            impact: "−44% время на рынке · +15–20% цена",
+          },
+        },
+        diff:
+          "ИИ-стейджинг на real-time движке позволяет дёшево и быстро показать пространство в нескольких стилях под разные аудитории. Высший уровень даёт фотореализм, который покупатель не отличает от съёмки — это сильнее всего влияет на эмоцию и цену.",
+        stats: [
+          { big: "73–88%", text: "быстрее продаются объекты с виртуальным стейджингом (NAR)" },
+          { big: "+15–20%", text: "к цене сделки при качественной визуализации интерьера" },
+          { big: "+90%", text: "к CTR объявлений со стейджингом; время на странице +70%" },
+          { big: "82%", text: "покупателей называют визуал интерьера важнейшим фактором" },
+        ],
+        bars: [
+          { title: "Время на рынке (дни)", note: "NAR / отраслевые данные", items: [["Без стейджинга", 52], ["Со стейджингом", 30]], unit: "дн", max: 52 },
+          { title: "Цена сделки", note: "относительно базы", items: [["База", 100], ["Со стейджингом", 118]] },
+        ],
+        photos: {
+          medium: ["block3-medium-1.jpg", "block3-medium-2.jpg"],
+          high: ["block3-high-1.jpg", "block3-high-2.jpg"],
+        },
+      },
+      {
+        id: "b4",
+        mode: "duration", // вместо количества — длительность ролика
+        kicker: "Блок 4",
+        title: "3D видео-ролик",
+        subtitle: "Динамичный пролёт по проекту для соцсетей, сайта, презентаций и наружной рекламы",
+        toggleLabel: "Подход",
+        options: {
+          A: {
+            name: "Классический рендер",
+            tag: "D5 Render / Lumion / Twinmotion",
+            desc: "Создаётся анимационный ролик с пролётами, демонстрирующими ключевые виды объекта: фасады, окружение, входные группы и благоустройство. Полный контроль траектории и качества кадра, предсказуемый кинематографичный результат.",
+            impact: "+403% запросов · −14–30% время",
+          },
+          B: {
+            name: "ИИ-генерация пролётов",
+            tag: "Image-to-video: Luma Ray / Runway Gen-4 / Kling / Sora",
+            desc: "Из уже готовых рендеров (блоки 1 и 3) генерируются кинематографичные пролёты за часы, а не недели. Быстро, дешевле, эффектно.",
+            impact: "+403% запросов · −14–30% время",
+            recommended: true,
+          },
+        },
+        diff:
+          "Классический рендер-ролик даёт максимальный контроль траектории и идеальную геометрию, но требует времени и бюджета. ИИ-пролёты создаются из уже готовых рендеров за часы, а не недели — отличная цена за эффект и скорость вывода контента в соцсети.",
+        stats: [
+          { big: "+403%", text: "больше запросов у объявлений с видео; +118% вовлечённость" },
+          { big: "14–30%", text: "быстрее продают объект видео-туры (Zillow / ZipDo)" },
+          { big: "+49%", text: "больше квалифицированных лидов; лендинги с видео +80% к конверсии" },
+          { big: "97%", text: "посмотревших видео-обход скорее купят объект (+28% к уверенности)" },
+        ],
+        bars: [
+          { title: "Запросы / лиды", note: "×4 к запросам", items: [["Без видео", 100], ["С видео", 403]], max: 403 },
+        ],
+        photos: {
+          A: ["block4-render-1.jpg", "block4-render-2.jpg"],
+          B: ["block4-ai-1.jpg", "block4-ai-2.jpg"],
+        },
+      },
+    ];
+
+    const OBJECT_TYPES = [
+      "Жилой комплекс",
+      "Апартаменты",
+      "Коттеджный посёлок",
+      "Коммерческая / ритейл",
+      "Многофункциональный (mixed-use)",
+    ];
+
+    /* =========================================================================
+       ЕДИНАЯ СИСТЕМА ЦЕНООБРАЗОВАНИЯ ПРОЕКТНЫХ УСЛУГ
+       Дисциплины: int (интерьер), arch (архитектура), blago (благоустройство).
+       Калибровка — по историческим данным бюро + аналитике рынка РФ (2026).
+       Все константы редактируемые. Ключевой предохранитель — ПОЛ ОКУПАЕМОСТИ:
+         стоимость ≥ dayNorm() × срок  ⇒  окупаемость никогда не < 1 (нет «минуса»).
+       Формула ставки: ставка = BASE_RPM[стадия] × K_тип × K_площадь(площадь).
+       ========================================================================= */
+
+    // Экономика компании → норма самоокупаемости (₽/раб.день на один проект).
+    // Единая для всех дисциплин: месячная себестоимость / (проектов одновременно × раб.дней).
+    // Значения COMPANY редактируются пользователем в «Инструментах компании»
+    // (App синхронизирует их из состояния при каждом рендере).
+    const WORKDAYS_PER_MONTH = 21;
+    // targetMargin — целевая чистая прибыль сверх безубытка (0.5 = +50%). Пол окупаемости
+    // гарантирует её: стоимость ≥ (1 + targetMargin) × норма × срок ⇒ бюро не работает «в ноль».
+    const COMPANY = { monthlyCost: 2500000, projects: 6, targetMargin: 0.5 };
+    const BIG_MARGIN = 0.3;          // для этапов > 5 млн допустима меньшая маржа (+30%)
+    const BIG_STAGE = 5000000;
+    const MAX_PAYBACK = 5;           // потолок окупаемости этапа: не выше 500%
+    const dayNorm = () => Math.round(COMPANY.monthlyCost / (Math.max(1, COMPANY.projects) * WORKDAYS_PER_MONTH));
+    // Целевая окупаемость-пол (раз): 1 + маржа. Для крупных этапов маржа мягче.
+    const floorPayback = (isBig) => 1 + (isBig ? Math.min(COMPANY.targetMargin, BIG_MARGIN) : COMPANY.targetMargin);
+
+    // Опорная площадь для затухания ставки, м²
+    const REF_AREA = { int: 1000, arch: 1000, blago: 10000 };
+
+    // Базовая ставка ₽/м² при опорной площади и базовом типе.
+    // arch откалибрована по реальной цене бюро: ЖК 17 000 м² ЭП = 2,7 млн (~159 ₽/м²)
+    // ⇒ ep база 290 (× rateAreaK≈0.55 на 17 000 = 160 ₽/м²); прочие стадии — в тех же пропорциях.
+    const BASE_RPM = {
+      int:   { od: 700, k: 250, ep: 2200, rd: 2800 },
+      arch:  { od: 130, k: 185, ep: 290,  rd: 530 },
+      blago: { od: 35,  mp: 60, gp: 65 },
+    };
+
+    // Базовый срок, раб. дн., при опорной площади.
+    // arch снижен по аналитике рынка РФ (ЭП 15–60 дн, РД 25–60+; срок зависит
+    // больше от сложности, чем от площади) — прежние значения были завышены.
+    const BASE_DAYS = {
+      int:   { od: 10, k: 15, ep: 45, rd: 50 },
+      arch:  { od: 12, k: 14, ep: 28, rd: 36 },
+      blago: { od: 15, mp: 20, gp: 30 },
+    };
+
+    // Множитель срока по типу объекта (детальные объекты дольше).
+    // Диапазон намеренно узкий: срок одной площади в разных типах отличается < 2×.
+    const DISC_TYPE_DAYS_K = {
+      int: {
+        "Частный дом / квартира": 1.3, "Отель": 1.15, "Ресторан / кафе": 1.1,
+        "Офис": 0.85, "Торговый центр": 0.8, "ЖК / МОП": 0.8, "Прочее": 1.0,
+      },
+      arch: {
+        "Отель": 1.25, "Ресторан / кафе": 1.15, "Частный дом": 1.2, "Офис": 1.0,
+        "Промышленный": 1.0, "ЖК": 0.95, "Торговый центр": 0.9, "Муниципальный": 0.9,
+      },
+      blago: { "Территория": 1.0 },
+    };
+
+    // Рыночная ставка РФ ₽/м² (для «превышения рынка» в инструментах компании)
+    const MARKET_RPM = {
+      int:   { od: 600, k: 800, ep: 1800, rd: 2500 },
+      arch:  { od: 200, k: 250, ep: 500,  rd: 1700 },
+      blago: { od: 20,  mp: 20, gp: 30 },
+    };
+
+    // Множитель типа объекта по дисциплине
+    const DISC_TYPE_K = {
+      int: {
+        "Частный дом / квартира": 1.3, "Отель": 1.2, "Ресторан / кафе": 1.2,
+        "Офис": 0.9, "Торговый центр": 0.85, "ЖК / МОП": 0.85, "Прочее": 1.0,
+      },
+      arch: {
+        "Отель": 1.6, "Ресторан / кафе": 1.4, "Частный дом": 1.3, "Офис": 1.2,
+        "Промышленный": 1.1, "ЖК": 1.0, "Торговый центр": 1.0, "Муниципальный": 0.9,
+      },
+      blago: { "Территория": 1.0 },
+    };
+    const DISC_TYPES = {
+      int:   Object.keys(DISC_TYPE_K.int),
+      arch:  Object.keys(DISC_TYPE_K.arch),
+      blago: Object.keys(DISC_TYPE_K.blago),
+    };
+
+    // Метаданные дисциплин
+    const DISC_META = {
+      int:   { label: "Интерьер",        areaLabel: "Площадь объекта, м²" },
+      arch:  { label: "Архитектура",     areaLabel: "Площадь объекта, м²" },
+      blago: { label: "Благоустройство", areaLabel: "Площадь территории, м²" },
+    };
+    const DISC_LIST = ["int", "arch", "blago"];
+
+    // Стадии по дисциплине: [ключ, название, код для КП]. Порядок = порядок в UI.
+    const DISC_STAGES = {
+      int: [
+        ["od", "Обмерная документация", "ОД"],
+        ["k",  "Концепт", "К"],
+        ["ep", "Эскизный проект", "ЭП"],
+        ["rd", "Рабочая документация", "РД"],
+        ["nadzor", "Авторский надзор", "НАДЗОР"],
+      ],
+      arch: [
+        ["od", "Обмерная документация", "ОД"],
+        ["k",  "Концепт", "К"],
+        ["ep", "Эскизный проект", "ЭП"],
+        ["rd", "Рабочая документация", "РД"],
+        ["nadzor", "Авторский надзор", "НАДЗОР"],
+      ],
+      blago: [
+        ["od", "Обмерная документация (топооснова)", "ОД"],
+        ["mp", "Мастер-план", "МП"],
+        ["gp", "Генеральный план", "ГП"],
+      ],
+    };
+
+    // Описания стадий (текст в КП, редактируется пользователем в карточке)
+    const STAGE_DESC = {
+      int: {
+        od: "Обмеры помещений и подготовка обмерного плана — точная геометрическая основа для дальнейшего проектирования.",
+        k: "Концепция интерьера: стилевое и планировочное решение, подбор референсов и материалов, укрупнённая проработка идеи под задачи заказчика.",
+        ep: "Эскизный проект интерьера: детальное объёмно-пространственное решение с учётом технического задания, на основании обмерной документации и обследования.",
+        rd: "Рабочая документация — комплекс чертежей, спецификаций и регламентов для точной реализации дизайн-проекта, по нормам ГОСТ и СП.",
+        nadzor: "Авторский надзор за реализацией: контроль соответствия проекту на площадке, консультации и выезды на объект.",
+      },
+      arch: {
+        od: "Обмерная документация здания: обмеры и подготовка обмерных планов существующих конструкций.",
+        k: "Архитектурная концепция: объёмно-планировочная идея, посадка на участок, укрупнённое решение фасадов и функционала.",
+        ep: "Эскизный проект: архитектурные решения — планы, фасады, разрезы, посадка на участок с учётом норм и ТЗ.",
+        rd: "Рабочая документация: архитектурные рабочие чертежи и спецификации для строительства по действующим нормам.",
+        nadzor: "Авторский надзор за строительством: контроль соответствия проектным решениям, консультации и выезды на объект.",
+      },
+      blago: {
+        od: "Обмерная документация территории: плоскостные обмеры участка и топографическая основа (топооснова) для проектирования.",
+        mp: "Мастер-план территории: функциональное зонирование, планировочная структура и сценарии использования пространства.",
+        gp: "Генеральный план благоустройства: планировочные и высотные решения, покрытия, озеленение, малые архитектурные формы.",
+      },
+    };
+
+    // Затухание ставки от площади (чем больше объект — тем ниже ₽/м²).
+    // Пол 0.55 — чтобы крупные проекты не проседали слишком сильно относительно рынка.
+    const rateAreaK = (disc, area) =>
+      clamp(0.55, 2.2, Math.pow(REF_AREA[disc] / Math.max(area, 1), 0.35));
+
+    // Слабое изменение срока от площади (экспонента 0.18 — срок зависит от площади
+    // слабее, чем стоимость; по рынку срок определяется в основном сложностью)
+    const daysAreaK = (disc, area) =>
+      clamp(0.5, 2.5, Math.pow(Math.max(area, 1) / REF_AREA[disc], 0.18));
+
+    // Срок стадии (раб. дн.) — с учётом типа объекта
+    const discDays = (disc, stage, area, type) => {
+      area = parseInt(area || 0, 10);
+      const base = BASE_DAYS[disc] && BASE_DAYS[disc][stage];
+      if (!area || base == null) return 0;
+      const typeK = (DISC_TYPE_DAYS_K[disc] && DISC_TYPE_DAYS_K[disc][type]) || 1;
+      return Math.round(base * daysAreaK(disc, area) * typeK);
+    };
+
+    // Стоимость стадии, ₽ (с полом окупаемости по норме компании)
+    const discCost = (disc, stage, type, area) => {
+      area = parseInt(area || 0, 10);
+      const base = BASE_RPM[disc] && BASE_RPM[disc][stage];
+      if (!area || base == null) return 0;
+      const typeK = (DISC_TYPE_K[disc] && DISC_TYPE_K[disc][type]) || 1;
+      const raw = area * base * typeK * rateAreaK(disc, area);
+      const norm = dayNorm();
+      const days = discDays(disc, stage, area, type);
+      // Пол = целевая маржа × норма × срок (прибыль, а не работа «в ноль»).
+      // Потолок = MAX_PAYBACK × норма × срок (окупаемость этапа не выше 500%).
+      const floor = floorPayback(raw > BIG_STAGE) * norm * days;
+      const ceil = MAX_PAYBACK * norm * days;
+      return Math.round(clamp(floor, ceil, raw));
+    };
+
+    // Рыночная стоимость стадии, ₽ (эталон РФ; ставка тоже падает с площадью)
+    const discMarket = (disc, stage, area) => {
+      area = parseInt(area || 0, 10);
+      const m = MARKET_RPM[disc] && MARKET_RPM[disc][stage];
+      return (!area || m == null) ? 0 : Math.round(area * m * rateAreaK(disc, area));
+    };
+
+    // ── Авторский надзор (интерьер / архитектура) — прайс 2026 ──
+    const NADZOR = {
+      visitBase: 15500,  // разовый выезд в пределах города
+      perKm: 500,        // ₽ за км от границы города
+      tiers: [
+        { maxArea: 300,      price: 88000,  label: "до 300 м² (+консультации до 5 р.ч./мес)" },
+        { maxArea: 800,      price: 132000, label: "300–800 м² (+консультации до 15 р.ч./мес)" },
+        { maxArea: Infinity, price: 176000, label: "более 800 м² (+консультации до 20 р.ч./мес)" },
+      ],
+    };
+    const nadzorTier = (area) =>
+      NADZOR.tiers.find((t) => (parseInt(area || 0, 10)) <= t.maxArea) || NADZOR.tiers[NADZOR.tiers.length - 1];
+    const nadzorCost = (mode, area, km) =>
+      mode === "visit"
+        ? NADZOR.visitBase + NADZOR.perKm * (parseInt(km || 0, 10))
+        : nadzorTier(area).price;
+
+    // Рыночный эталон авторского надзора РФ, ₽/мес по диапазону площади (аналитика 2025–2026).
+    // Интерьерный надзор у дизайнеров дешевле, архитектурный (стройка) — дороже.
+    const MARKET_NADZOR = {
+      int:  [[300, 30000], [800, 45000], [Infinity, 65000]],   // дизайнеры интерьера: ~30–65 т.р./мес
+      arch: [[300, 60000], [800, 120000], [Infinity, 190000]], // архитекторы (стройнадзор): ~60–190 т.р./мес
+    };
+    const MARKET_VISIT = 25000; // средняя цена разового выезда по РФ (15–45 т.р.)
+    const nadzorMarket = (disc, mode, area) => {
+      if (mode === "visit") return MARKET_VISIT;
+      const bands = MARKET_NADZOR[disc] || MARKET_NADZOR.arch;
+      const a = parseInt(area || 0, 10);
+      return (bands.find(([mx]) => a <= mx) || bands[bands.length - 1])[1];
+    };
+
+    // ── Единые аксессоры стадии с учётом ручных переопределений ──
+    // dstate = { area, type, stages:{ key:{enabled, manualDays, manualDesc, manualPrice, mode, km} } }
+    // Авторасчётная стоимость стадии (без ручного переопределения цены)
+    const stageAutoCost = (disc, key, dstate) => {
+      if (key === "nadzor") {
+        const s = dstate.stages.nadzor;
+        return s ? nadzorCost(s.mode, dstate.area, s.km) : 0;
+      }
+      return discCost(disc, key, dstate.type, dstate.area);
+    };
+    // Эффективная стоимость: ручная цена (st.manualPrice) имеет приоритет
+    const stageCost = (disc, key, dstate) => {
+      const s = dstate.stages[key];
+      if (s && s.manualPrice != null) return s.manualPrice;
+      return stageAutoCost(disc, key, dstate);
+    };
+    const stageAutoDays = (disc, key, dstate) =>
+      key === "nadzor" ? 0 : discDays(disc, key, dstate.area, dstate.type); // надзор — срок по договору/вручную
+    const stageDays = (disc, key, dstate) => {
+      const s = dstate.stages[key];
+      return (s && s.manualDays != null) ? s.manualDays : stageAutoDays(disc, key, dstate);
+    };
+    // Инструменты компании: окупаемость (раз) и превышение рынка (доля)
+    const stagePayback = (disc, key, dstate) => {
+      const d = stageDays(disc, key, dstate);
+      const c = stageCost(disc, key, dstate);
+      return d > 0 ? (c / d) / dayNorm() : 0;
+    };
+    const stageMarketDelta = (disc, key, dstate) => {
+      if (key === "nadzor") {
+        const s = dstate.stages.nadzor;
+        const m = s ? nadzorMarket(disc, s.mode, dstate.area) : 0;
+        const c = stageCost(disc, "nadzor", dstate);
+        return m > 0 ? c / m - 1 : null;
+      }
+      const m = discMarket(disc, key, dstate.area);
+      const c = stageCost(disc, key, dstate);
+      return m > 0 ? c / m - 1 : null;
+    };
+
+    // Подсказка по стоимости при ручном изменении срока (необязательная, с кнопкой «заменить»).
+    // Меньше срок → пропорционально ниже цена. Больше срок → поднять, если окупаемость
+    // упала ниже порога: 150% для этапов ≤ 5 млн, 130% — для дороже (пороги от нормы компании).
+    const stageSuggestion = (disc, key, dstate) => {
+      if (key === "nadzor") return null;              // надзор — фикс/мес, без пересчёта по сроку
+      const s = dstate.stages[key];
+      if (!s || s.manualDays == null) return null;    // только когда срок задан вручную
+      const auto = stageAutoDays(disc, key, dstate);
+      const md = s.manualDays;
+      if (!auto || md === auto) return null;
+      const baseCost = stageAutoCost(disc, key, dstate);
+      if (baseCost <= 0) return null;
+      const cur = stageCost(disc, key, dstate);
+      if (md < auto) {
+        // быстрее → можно снизить цену пропорционально сэкономленному времени
+        const X = Math.round(baseCost * md / auto);
+        return X < cur ? { type: "down", price: X } : null;
+      }
+      // дольше → окупаемость падает; рекомендуем поднять, если ниже целевой маржи
+      const norm = dayNorm();
+      const payback = md > 0 ? (cur / md) / norm : 0;
+      const thr = floorPayback(cur > BIG_STAGE);
+      if (payback >= thr) return null;
+      const Y = Math.round(thr * norm * md);
+      return Y > cur ? { type: "up", price: Y, threshold: thr } : null;
+    };
+
+    // Перечень включённых стадий по всем дисциплинам (для сметы / КП / инструментов)
+    const enabledStageItems = (discState) => {
+      const out = [];
+      DISC_LIST.forEach((disc) => {
+        const dstate = discState[disc];
+        DISC_STAGES[disc].forEach(([key, label, code]) => {
+          const s = dstate.stages[key];
+          if (!s || !s.enabled) return;
+          out.push({
+            disc, key, code, label,
+            cost: stageCost(disc, key, dstate),
+            days: stageDays(disc, key, dstate),
+            sub: dstate.type + (dstate.area ? " · " + dstate.area + " м²" : ""),
+          });
+        });
+      });
+      return out;
+    };
+    const discCostTotal = (discState) => enabledStageItems(discState).reduce((s, it) => s + it.cost, 0);
+    const discDaysTotal = (discState) => enabledStageItems(discState).reduce((s, it) => s + it.days, 0);
+    const discAnyEnabled = (dstate) => Object.keys(dstate.stages).some((k) => dstate.stages[k].enabled);
+
+    // Начальное состояние дисциплин: все стадии выключены, ждут выбора
+    const makeInitialDisc = () => {
+      const d = {};
+      DISC_LIST.forEach((disc) => {
+        const stages = {};
+        DISC_STAGES[disc].forEach(([k]) => {
+          stages[k] = k === "nadzor"
+            ? { enabled: false, mode: "consult", km: "" }
+            : { enabled: false };
+        });
+        d[disc] = { area: "", type: DISC_TYPES[disc][0], stages };
+      });
+      return d;
+    };
+
+    /* =========================================================================
+       КОМПОНЕНТЫ
+       ========================================================================= */
+
+    // Плавный счётчик чисел при пересчёте
+    function AnimatedNumber({ value, format = (v) => v }) {
+      const [display, setDisplay] = useState(value);
+      const fromRef = useRef(value);
+      const rafRef = useRef(null);
+      useEffect(() => {
+        const from = fromRef.current;
+        const to = value;
+        const start = performance.now();
+        const dur = 450;
+        cancelAnimationFrame(rafRef.current);
+        const tick = (now) => {
+          const t = Math.min(1, (now - start) / dur);
+          const eased = 1 - Math.pow(1 - t, 3);
+          setDisplay(from + (to - from) * eased);
+          if (t < 1) rafRef.current = requestAnimationFrame(tick);
+          else fromRef.current = to;
+        };
+        rafRef.current = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(rafRef.current);
+      }, [value]);
+      return <span>{format(display)}</span>;
+    }
+
+    // Фирменная текстура-дизеринг (пиксельный полутон) — векторная, печатается чётко
+    let __txSeq = 0;
+    function BrandTexture({ dot = "#F7FF1D", base = "#D9D9D9", flip = false, className = "" }) {
+      const idRef = useRef("tx" + (++__txSeq));
+      const id = idRef.current;
+      return (
+        <svg className={className} viewBox="0 0 320 96" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <defs>
+            <pattern id={"p" + id} width="6" height="6" patternUnits="userSpaceOnUse">
+              <rect width="3" height="3" fill={dot} />
+            </pattern>
+            <linearGradient id={"g" + id} x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stopColor="#fff" stopOpacity={flip ? 0 : 1} />
+              <stop offset="0.55" stopColor="#fff" stopOpacity="0.5" />
+              <stop offset="1" stopColor="#fff" stopOpacity={flip ? 1 : 0} />
+            </linearGradient>
+            <mask id={"m" + id}>
+              <rect width="320" height="96" fill={"url(#g" + id + ")"} />
+            </mask>
+          </defs>
+          <rect width="320" height="96" fill={base} />
+          <rect width="320" height="96" fill={"url(#p" + id + ")"} mask={"url(#m" + id + ")"} />
+        </svg>
+      );
+    }
+
+    // Переключатель уровня качества / варианта — квадратные кнопки в духе бренда
+    function QualityToggle({ options, value, onChange }) {
+      const keys = Object.keys(options);
+      return (
+        <div className="inline-flex hair bg-air">
+          {keys.map((k, i) => {
+            const active = k === value;
+            return (
+              <button
+                key={k}
+                onClick={() => onChange(k)}
+                className={
+                  "relative px-5 py-2 text-sm transition-all " +
+                  (i > 0 ? "border-l border-concrete " : "") +
+                  (active ? "bg-night text-air font-medium" : "text-black/45 hover:text-black/70 font-light")
+                }
+              >
+                {options[k].name}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Инфографика — горизонтальные бары сравнения
+    function StatBar({ title, note, items, max, unit }) {
+      const ceil = max || Math.max(...items.map((i) => i[1]));
+      return (
+        <div className="rounded-2xl bg-black/[0.03] p-5 print-block">
+          <div className="flex items-baseline justify-between mb-4">
+            <h5 className="text-sm font-bold text-ink">{title}</h5>
+            {note && <span className="text-xs text-black/40">{note}</span>}
+          </div>
+          <div className="space-y-3">
+            {items.map(([name, v], idx) => {
+              const isLast = idx === items.length - 1;
+              const pct = Math.max(4, (v / ceil) * 100);
+              return (
+                <div key={name}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className={isLast ? "font-semibold text-accent" : "text-black/50"}>{name}</span>
+                    <span className={isLast ? "font-bold text-accent" : "text-black/50"}>
+                      {v}{unit ? " " + unit : "%"}
+                    </span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-black/10 overflow-hidden">
+                    <div
+                      className={"bar-fill h-full rounded-full " + (isLast ? "bg-accent" : "bg-black/30")}
+                      style={{ width: pct + "%" }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    // Аккордеон-секция (сворачиваемый блок) с мастер-галочкой «в КП»
+    function Collapsible({ label, isOpen, onToggle, checked, onCheck, printHidden, children }) {
+      return (
+        <div className="hair bg-air overflow-hidden">
+          <div className="no-print flex items-stretch bg-steel">
+            <button
+              className="flex-1 flex items-center justify-between px-6 sm:px-9 py-5 hover:bg-concrete/60 transition text-left"
+              onClick={onToggle}
+            >
+              <span className="text-xl sm:text-2xl font-normal tracking-tight">{label}</span>
+              <span className="text-2xl font-light text-black/40 ml-4 select-none">{isOpen ? "−" : "+"}</span>
+            </button>
+            {onCheck && (
+              <label
+                className="shrink-0 flex items-center gap-2 cursor-pointer select-none px-5 border-l border-concrete"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input type="checkbox" checked={checked} onChange={onCheck} className="w-5 h-5 accent-grape" />
+                <span className="text-xs font-medium uppercase tracking-wide text-black/50">в КП</span>
+              </label>
+            )}
+          </div>
+          <div className={"acc-body" + (isOpen ? "" : " closed") + (printHidden ? " print-hide" : "")}>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    // Панель параметров проекта дисциплины (интерьер / архитектура / благоустройство)
+    function DisciplineParams({ disc, dstate, onChange, onReset }) {
+      const field = "mt-1 w-full hair bg-air px-3 py-2.5 text-sm font-normal outline-none focus:border-grape";
+      const lbl   = "text-[11px] font-medium uppercase tracking-[0.18em] text-black/40";
+      const hide  = (v) => (v ? "" : " print-hide");
+      const types = DISC_TYPES[disc];
+      const showType = types.length > 1;
+      return (
+        <section className="bg-air hair p-5 sm:p-6 print-tight print-block">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-normal tracking-tight text-ink">Параметры проекта</h2>
+            <button onClick={onReset}
+              className="no-print text-[11px] font-medium uppercase tracking-wide text-black/40 hover:text-grape border border-concrete px-3 py-1.5 transition">
+              Сбросить
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print-gap">
+            <div className={hide(dstate.area)}>
+              <label className={lbl}>{DISC_META[disc].areaLabel}</label>
+              <input type="number" min="0" className={field} value={dstate.area}
+                placeholder="введите площадь"
+                onChange={(e) => onChange({ area: e.target.value })} />
+            </div>
+            {showType && (
+              <div className={hide(dstate.type)}>
+                <label className={lbl}>Тип объекта</label>
+                <select className={field} value={dstate.type}
+                  onChange={(e) => onChange({ type: e.target.value })}>
+                  {types.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+          {disc === "blago" && (
+            <p className="no-print mt-3 text-xs font-light text-black/45">
+              Топооснова — плоскостные обмеры территории (в гектарах/сотках), единицы приведены к м² для расчёта.
+            </p>
+          )}
+        </section>
+      );
+    }
+
+    // Квадратик «Срок выполнения» с переключением авторасчёт ⇄ ручной ввод.
+    // manualDays === null → авто; число → введено вручную (попадает в КП).
+    function DaysCard({ autoDays, manualDays, setManualDays }) {
+      const [editing, setEditing] = useState(false);
+      const manual = manualDays != null;
+      const value = manual ? manualDays : autoDays;
+      return (
+        <div className="bg-lilac text-night p-5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-night/60">Срок выполнения</div>
+            {!editing && (
+              <button onClick={() => setEditing(true)}
+                className="no-print text-night/40 hover:text-night leading-none" title="Изменить срок">✎</button>
+            )}
+          </div>
+          {editing ? (
+            <div className="no-print mt-1 flex items-center gap-2">
+              <input
+                type="number" min="0" autoFocus
+                value={value}
+                onChange={(e) => setManualDays(e.target.value === "" ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0))}
+                className="w-20 bg-transparent border-b border-night/40 text-2xl font-normal text-night text-right outline-none focus:border-grape"
+              />
+              <span className="text-sm">раб. дн.</span>
+              <button onClick={() => setEditing(false)} className="text-sm font-medium text-night/70 hover:text-night">OK</button>
+              {manual && (
+                <button onClick={() => { setManualDays(null); setEditing(false); }}
+                  className="text-sm text-night/40 hover:text-night/70">авто</button>
+              )}
+            </div>
+          ) : (
+            <div className="mt-1 text-2xl font-normal">
+              {value > 0 ? value + " раб. дн." : <span className="text-night/40">—</span>}
+              {manual && <span className="ml-2 align-middle text-[11px] text-night/50">вручную</span>}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Карточка «Стоимость» с ручным вводом цены (по аналогии с DaysCard).
+    // manualPrice == null → авторасчёт; число → введено вручную (попадает в КП).
+    function PriceCard({ label = "Стоимость", autoPrice, manualPrice, setManualPrice }) {
+      const [editing, setEditing] = useState(false);
+      const manual = manualPrice != null;
+      const value = manual ? manualPrice : autoPrice;
+      return (
+        <div className="bg-night text-air p-5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-white/50">{label}</div>
+            {!editing && (
+              <button onClick={() => setEditing(true)}
+                className="no-print text-white/40 hover:text-white leading-none" title="Изменить стоимость">✎</button>
+            )}
+          </div>
+          {editing ? (
+            <div className="no-print mt-1 flex items-center gap-2 flex-wrap">
+              <input
+                type="number" min="0" autoFocus
+                value={value}
+                onChange={(e) => setManualPrice(e.target.value === "" ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0))}
+                className="w-32 bg-transparent border-b border-white/40 text-2xl font-normal text-air text-right outline-none focus:border-lilac"
+              />
+              <span className="text-sm">₽</span>
+              <button onClick={() => setEditing(false)} className="text-sm font-medium text-white/70 hover:text-white">OK</button>
+              {manual && (
+                <button onClick={() => { setManualPrice(null); setEditing(false); }}
+                  className="text-sm text-white/40 hover:text-white/70">авто</button>
+              )}
+            </div>
+          ) : (
+            <div className="mt-1 text-2xl sm:text-3xl font-normal">
+              {value > 0 ? <AnimatedNumber value={value} format={rub} /> : <span className="text-white/40">—</span>}
+              {manual && <span className="no-print ml-2 align-middle text-[11px] text-white/45">вручную</span>}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Блок описания услуги с возможностью изменить/дополнить текст (попадает в КП).
+    // manualText === null → используется текст по умолчанию; строка → правка пользователя.
+    function DescEditor({ className, label, defaultText, manualText, setManualText }) {
+      const [editing, setEditing] = useState(false);
+      const [draft, setDraft] = useState("");
+      const manual = manualText != null;
+      const text = manual ? manualText : defaultText;
+      const startEdit = () => { setDraft(text); setEditing(true); };
+      const save = () => {
+        const v = draft.replace(/\s+$/, "");
+        setManualText(v === "" || v === defaultText ? null : v);
+        setEditing(false);
+      };
+      return (
+        <div className={(className || "") + " bg-steel border-l-2 border-grape p-4"}>
+          <div className="flex items-start justify-between gap-2">
+            {label ? <div className="text-sm font-medium text-ink">{label}</div> : <div />}
+            {!editing && (
+              <button onClick={startEdit}
+                className="no-print shrink-0 text-night/40 hover:text-night leading-none" title="Изменить описание">✎</button>
+            )}
+          </div>
+          {editing ? (
+            <div className="no-print mt-1">
+              <textarea
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={6}
+                className="w-full hair bg-air px-3 py-2 text-sm font-light leading-snug outline-none focus:border-grape resize-y"
+              />
+              <div className="mt-2 flex items-center gap-4 text-sm">
+                <button onClick={save} className="font-medium text-grape hover:text-night">Сохранить</button>
+                <button onClick={() => setEditing(false)} className="text-night/40 hover:text-night/70">отмена</button>
+                {manual && (
+                  <button onClick={() => { setManualText(null); setEditing(false); }}
+                    className="text-night/40 hover:text-night/70">сбросить к стандартному</button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="mt-1 text-sm font-light text-black/55 whitespace-pre-wrap">
+              {text}
+              {manual && <span className="no-print ml-2 align-middle text-[11px] text-grape">изменено</span>}
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    // Карточка стадии дисциплины (ОД / К / ЭП / РД). Надзор — отдельная карточка ниже.
+    function ServiceCard({ disc, stageKey, stageLabel, dstate, sstate, onChange }) {
+      const autoCost = stageAutoCost(disc, stageKey, dstate);
+      const auto = stageAutoDays(disc, stageKey, dstate);
+      const suggestion = stageSuggestion(disc, stageKey, dstate);
+      return (
+        <section className={"fade-up bg-air hair overflow-hidden print-block" + (sstate.enabled ? "" : " print-hide")}>
+          <div className="px-6 sm:px-9 pt-8 pb-6 print-tight border-b border-concrete bg-steel">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-black/40">{DISC_META[disc].label}</span>
+                <h3 className="mt-2 text-2xl sm:text-3xl font-normal tracking-tight text-ink">{stageLabel}</h3>
+                <p className="mt-2 text-sm font-light text-black/55">
+                  Стоимость и срок рассчитываются по параметрам выше
+                </p>
+              </div>
+              <label className="no-print shrink-0 flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" checked={sstate.enabled} onChange={(e) => onChange({ enabled: e.target.checked })}
+                  className="w-5 h-5 accent-grape" />
+                <span className="text-xs font-medium uppercase tracking-wide text-black/50">в КП</span>
+              </label>
+            </div>
+          </div>
+          <div className="px-6 sm:px-9 py-7 print-tight">
+            <DescEditor
+              label="Описание услуги"
+              defaultText={STAGE_DESC[disc][stageKey]}
+              manualText={sstate.manualDesc}
+              setManualText={(v) => onChange({ manualDesc: v })}
+            />
+            <div className="mt-5 grid grid-cols-2 gap-4">
+              <PriceCard autoPrice={autoCost} manualPrice={sstate.manualPrice} setManualPrice={(v) => onChange({ manualPrice: v })} />
+              <DaysCard autoDays={auto} manualDays={sstate.manualDays} setManualDays={(v) => onChange({ manualDays: v })} />
+            </div>
+
+            {/* Подсказка по стоимости при ручном изменении срока */}
+            {suggestion && (
+              <div className={"no-print mt-4 flex flex-wrap items-center justify-between gap-3 p-3.5 border-l-2 " +
+                (suggestion.type === "down" ? "bg-sun/20 border-sun" : "bg-dawn/20 border-dawn")}>
+                <div className="text-sm font-light text-black/70">
+                  {suggestion.type === "down"
+                    ? <>Срок сокращён — есть возможность уменьшить стоимость до <span className="font-medium text-ink">{rub(suggestion.price)}</span></>
+                    : <>Срок увеличен, доходность ниже {Math.round(suggestion.threshold * 100)}% — рекомендую увеличить стоимость до <span className="font-medium text-ink">{rub(suggestion.price)}</span></>}
+                </div>
+                <button onClick={() => onChange({ manualPrice: suggestion.price })}
+                  className="shrink-0 bg-night text-air text-xs font-medium uppercase tracking-wide px-3 py-2 hover:bg-grape transition">
+                  Заменить в КП
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      );
+    }
+
+    // Карточка авторского надзора (интерьер / архитектура): тариф или разовый выезд
+    function NadzorCard({ disc, stageLabel, dstate, sstate, onChange }) {
+      const autoCost = stageAutoCost(disc, "nadzor", dstate);
+      const tier = nadzorTier(dstate.area);
+      const seg = "no-print px-4 py-2 text-sm transition-all ";
+      return (
+        <section className={"fade-up bg-air hair overflow-hidden print-block" + (sstate.enabled ? "" : " print-hide")}>
+          <div className="px-6 sm:px-9 pt-8 pb-6 print-tight border-b border-concrete bg-steel">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-black/40">{DISC_META[disc].label}</span>
+                <h3 className="mt-2 text-2xl sm:text-3xl font-normal tracking-tight text-ink">{stageLabel}</h3>
+                <p className="mt-2 text-sm font-light text-black/55">Тариф ведения или разовый выезд</p>
+              </div>
+              <label className="no-print shrink-0 flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" checked={sstate.enabled} onChange={(e) => onChange({ enabled: e.target.checked })}
+                  className="w-5 h-5 accent-grape" />
+                <span className="text-xs font-medium uppercase tracking-wide text-black/50">в КП</span>
+              </label>
+            </div>
+          </div>
+          <div className="px-6 sm:px-9 py-7 print-tight">
+            {/* Режим надзора */}
+            <div className="no-print">
+              <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Формат надзора</div>
+              <div className="inline-flex hair bg-air">
+                <button onClick={() => onChange({ mode: "consult" })}
+                  className={seg + (sstate.mode !== "visit" ? "bg-night text-air font-medium" : "text-black/45 font-light hover:text-black/70")}>
+                  Ведение объекта
+                </button>
+                <button onClick={() => onChange({ mode: "visit" })}
+                  className={seg + "border-l border-concrete " + (sstate.mode === "visit" ? "bg-night text-air font-medium" : "text-black/45 font-light hover:text-black/70")}>
+                  Разовый выезд
+                </button>
+              </div>
+            </div>
+
+            {sstate.mode === "visit" ? (
+              <div className="no-print mt-4">
+                <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Расстояние от границы города, км</div>
+                <input type="number" min="0" value={sstate.km} placeholder="0 — в пределах города"
+                  onChange={(e) => onChange({ km: e.target.value })}
+                  className="block w-56 hair bg-air px-3 py-2.5 text-lg font-normal outline-none focus:border-grape" />
+                <p className="mt-1.5 text-xs font-light text-black/45">
+                  {rub(NADZOR.visitBase)} базово + {rub(NADZOR.perKm)}/км
+                </p>
+              </div>
+            ) : (
+              <div className="no-print mt-4 text-xs font-light text-black/55">
+                Тариф по площади: <span className="font-medium text-ink">{tier.label}</span>
+              </div>
+            )}
+
+            <DescEditor
+              className="mt-5"
+              label="Описание услуги"
+              defaultText={STAGE_DESC[disc].nadzor}
+              manualText={sstate.manualDesc}
+              setManualText={(v) => onChange({ manualDesc: v })}
+            />
+            <div className="mt-5 grid grid-cols-2 gap-4">
+              <PriceCard autoPrice={autoCost} manualPrice={sstate.manualPrice} setManualPrice={(v) => onChange({ manualPrice: v })} />
+              <DaysCard autoDays={0} manualDays={sstate.manualDays} setManualDays={(v) => onChange({ manualDays: v })} />
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    // Плашка-раздел без методики расчёта (алгоритм ценообразования пока не задан).
+    // Не участвует в смете и не попадает в PDF — ждём инструкции по ценам.
+    function PendingBlockCard({ kicker, title, subtitle }) {
+      return (
+        <section className="bg-air hair overflow-hidden">
+          <div className="px-6 sm:px-9 pt-8 pb-6 border-b border-concrete bg-steel">
+            <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-black/40">{kicker}</span>
+            <h3 className="mt-2 text-2xl sm:text-3xl font-normal tracking-tight text-ink">{title}</h3>
+            {subtitle && <p className="mt-2 text-sm font-light text-black/55">{subtitle}</p>}
+          </div>
+          <div className="px-6 sm:px-9 py-7">
+            <div className="bg-steel border-l-2 border-grape p-4">
+              <div className="text-sm font-medium text-ink">Методика расчёта в подготовке</div>
+              <p className="mt-1 text-sm font-light text-black/55">
+                Алгоритм ценообразования будет добавлен. Раздел пока не участвует в смете.
+              </p>
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    // Фото-заглушка с фолбэком при ошибке загрузки
+    function PhotoPlaceholder({ file }) {
+      const [failed, setFailed] = useState(false);
+      return (
+        <div className="relative w-full overflow-hidden bg-steel hair" style={{ aspectRatio: "16 / 10" }}>
+          {!failed ? (
+            <img
+              src={EX + file}
+              alt="Пример работы"
+              loading="lazy"
+              onError={() => setFailed(true)}
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-black/30">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="3" width="18" height="18" rx="3" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="M21 15l-5-5L5 21" />
+              </svg>
+              <span className="mt-2 text-xs font-medium">Фото будет добавлено</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Карточка-калькулятор (переиспользуется для всех 4 блоков)
+    function CalculatorBlock({ cfg, params, blocks, state, onChange, idx }) {
+      const mode = cfg.mode || "count"; // "count" | "area" | "duration"
+      const opt = state.opt;
+      // текущий вариант (для b2 — единственный) и его фото
+      const option = mode === "area" ? cfg.single : cfg.options[opt];
+      const photos = mode === "area" ? cfg.photos : cfg.photos[opt];
+      const autoPrice = blockPrice(cfg.id, state, params);
+      const days = blockDays(cfg.id, state, params);
+
+      const setOpt = (k) => {
+        // при смене уровня пересчитываем рекомендованное количество (только count-режим)
+        const patch = { opt: k };
+        if (mode === "count") patch.count = recommend[cfg.id](params);
+        onChange(patch);
+      };
+      const setCount = (c) => onChange({ count: Math.max(1, c) });
+
+      return (
+        <section
+          className={"fade-up bg-air hair overflow-hidden print-block" + (state.enabled ? "" : " print-hide")}
+          style={{ animationDelay: idx * 0.05 + "s" }}
+        >
+          {/* Шапка блока */}
+          <div className="relative px-6 sm:px-9 pt-8 pb-6 print-tight border-b border-concrete bg-steel">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-black/40">{cfg.kicker}</span>
+                <h3 className="mt-2 text-2xl sm:text-3xl font-normal tracking-tight text-ink">{cfg.title}</h3>
+                <p className="mt-2 max-w-2xl text-sm sm:text-base font-light text-black/55">{cfg.subtitle}</p>
+              </div>
+              {/* чекбокс «включить в КП» */}
+              <label className="no-print shrink-0 flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={state.enabled}
+                  onChange={(e) => onChange({ enabled: e.target.checked })}
+                  className="w-5 h-5 accent-grape"
+                />
+                <span className="text-xs font-medium uppercase tracking-wide text-black/50">в КП</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="px-6 sm:px-9 py-7 print-tight">
+            {/* Площадь модели — наверху, на месте количества ракурсов */}
+            {mode === "area" && (
+              <div>
+                <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Площадь для модели, м²</div>
+                <input
+                  type="number"
+                  min="0"
+                  value={state.area}
+                  placeholder="введите площадь"
+                  onChange={(e) => onChange({ area: e.target.value })}
+                  className="block w-48 hair bg-air px-3 py-2.5 text-lg font-normal outline-none focus:border-grape"
+                />
+              </div>
+            )}
+
+            {/* Уровень качества + количество / длительность в одной строке */}
+            {mode !== "area" && (
+              <div className="flex flex-wrap items-start gap-x-12 gap-y-5">
+                <div>
+                  <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">{cfg.toggleLabel}</div>
+                  <QualityToggle options={cfg.options} value={opt} onChange={setOpt} />
+                </div>
+
+                {mode === "count" && (
+                  <div>
+                    <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Количество ({cfg.unitLabel})</div>
+                    <div className="inline-flex items-center hair bg-air">
+                      <button onClick={() => setCount(state.count - 1)} className="no-print w-10 h-10 text-lg text-black/50 hover:bg-sun hover:text-night transition">−</button>
+                      <input
+                        type="number"
+                        min="1"
+                        value={state.count}
+                        onChange={(e) => setCount(parseInt(e.target.value || "1", 10))}
+                        className="w-16 text-center text-lg font-normal bg-transparent outline-none border-x border-concrete h-10"
+                      />
+                      <button onClick={() => setCount(state.count + 1)} className="no-print w-10 h-10 text-lg text-black/50 hover:bg-sun hover:text-night transition">+</button>
+                    </div>
+                  </div>
+                )}
+
+                {mode === "duration" && (
+                  <div>
+                    <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Длительность ролика</div>
+                    <div className="inline-flex flex-wrap hair bg-air">
+                      {DURATIONS.map((d, i) => (
+                        <button key={d.key} onClick={() => onChange({ dur: d.key })}
+                          className={"no-print px-4 py-2 text-sm transition-all " + (i > 0 ? "border-l border-concrete " : "") +
+                            (state.dur === d.key ? "bg-night text-air font-medium" : "text-black/45 font-light hover:text-black/70")}>
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Видео: модель предоставляется заказчиком */}
+            {mode === "duration" && (
+              <label className="mt-5 flex items-start gap-2.5 cursor-pointer select-none max-w-md">
+                <input
+                  type="checkbox"
+                  checked={!!state.clientModel}
+                  onChange={(e) => onChange({ clientModel: e.target.checked })}
+                  className="mt-0.5 w-5 h-5 accent-grape shrink-0"
+                />
+                <span className="text-sm font-light text-black/65">
+                  Модель Revit / ArchiCAD / 3ds Max предоставляется заказчиком
+                  <span className="block text-xs text-black/40">иначе добавляется стоимость маркетинговой модели (по данным проекта)</span>
+                </span>
+              </label>
+            )}
+
+            {/* Описание варианта (попадает в КП) — с возможностью изменить/дополнить */}
+            <DescEditor
+              className={mode !== "area" ? "mt-5" : ""}
+              label={option.tag}
+              defaultText={option.desc}
+              manualText={state.manualDesc}
+              setManualText={(v) => onChange({ manualDesc: v })}
+            />
+
+            {/* Фото-примеры — сразу под описанием */}
+            <div className="print-hide mt-5 grid grid-cols-2 gap-4">
+              {photos.map((f) => (
+                <PhotoPlaceholder key={f} file={f} />
+              ))}
+            </div>
+
+            {/* Стоимость + срок выполнения (по аналогии с интерьерным блоком) */}
+            <div className="mt-7 grid grid-cols-2 gap-4">
+              <PriceCard
+                label="Стоимость блока"
+                autoPrice={autoPrice}
+                manualPrice={state.manualPrice}
+                setManualPrice={(v) => onChange({ manualPrice: v })}
+              />
+              <DaysCard
+                autoDays={days}
+                manualDays={state.manualDays}
+                setManualDays={(v) => onChange({ manualDays: v })}
+              />
+            </div>
+
+            {/* Влияние на продажи — отдельным блоком ниже */}
+            <div className="mt-4 bg-lilac text-night p-5">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-night/60">Влияние на продажи</div>
+              <div className="mt-1 text-sm font-medium leading-snug">{option.impact}</div>
+            </div>
+
+          </div>
+        </section>
+      );
+    }
+
+    // Панель параметров проекта
+    function ProjectParams({ params, setParams, onReset }) {
+      const upd = (k, v) => setParams((p) => ({ ...p, [k]: v }));
+      const field = "mt-1 w-full hair bg-air px-3 py-2.5 text-sm font-normal outline-none focus:border-grape";
+      const lbl = "text-[11px] font-medium uppercase tracking-[0.18em] text-black/40";
+      // незаполненные поля не попадают в PDF
+      const hide = (v) => (v === "" || v == null ? " print-hide" : "");
+      return (
+        <section id="calc" className="fade-up bg-air hair p-5 sm:p-6 print-tight print-block">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-normal tracking-tight text-ink">Параметры проекта</h2>
+            <button onClick={onReset}
+              className="no-print text-[11px] font-medium uppercase tracking-wide text-black/40 hover:text-grape border border-concrete px-3 py-1.5 transition">
+              Сбросить
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print-gap">
+            <div className={hide(params.objectType)}>
+              <label className={lbl}>Тип объекта</label>
+              <select className={field} value={params.objectType} onChange={(e) => upd("objectType", e.target.value)}>
+                <option value="">— не выбрано —</option>
+                {OBJECT_TYPES.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div className={hide(params.towers)}>
+              <label className={lbl}>Башен / корпусов</label>
+              <input type="number" min="1" max="20" className={field} value={params.towers}
+                placeholder="введите количество"
+                onChange={(e) => upd("towers", e.target.value === "" ? "" : Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 1)))} />
+            </div>
+            <div className={hide(params.area)}>
+              <label className={lbl}>Площадь застройки, м²</label>
+              <input type="number" min="0" className={field} value={params.area}
+                placeholder="введите площадь"
+                onChange={(e) => upd("area", e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value, 10) || 0))} />
+            </div>
+            <div className={hide(params.floors)}>
+              <label className={lbl}>Этажность</label>
+              <div className="mt-1 flex gap-1.5">
+                {FLOOR_BANDS.map((b) => (
+                  <button key={b.key} onClick={() => upd("floors", b.key)}
+                    className={"flex-1 px-2 py-2 text-xs transition-all border " +
+                      (params.floors === b.key
+                        ? "bg-night text-air border-night font-medium"
+                        : "bg-air text-black/50 border-concrete font-light hover:text-black/70")}>
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    // Итоговая панель (sticky)
+    function SummaryBar({ discState, blocks, params, total, autoDays, manualDays, setManualDays, displayDays,
+                          showTools, setShowTools, companyCost, setCompanyCost, companyProjects, setCompanyProjects,
+                          showDate, setShowDate }) {
+      const items = enabledStageItems(discState);
+      const hasPresItems = BLOCKS.some((c) => blocks[c.id].enabled);
+      const hasAny = items.length > 0 || hasPresItems;
+
+      // Срок выполнения: ручное переопределение хранится в App (чтобы попасть в PDF)
+      const [editingDays, setEditingDays] = useState(false);
+
+      // Агрегат окупаемости компании: Σстоимость / Σ(срок × норма_день)
+      // EBITDA (прибыль до налога) = стоимость − самоокупаемость (норма × срок).
+      const norm = dayNorm();
+      let sumCost = 0, sumBreak = 0, ebCost = 0, ebDays = 0;
+      items.forEach((it) => {
+        sumCost += it.cost; sumBreak += it.days * norm;
+        if (it.days > 0) { ebCost += it.cost; ebDays += it.days; }
+      });
+      const compPayback = sumBreak > 0 ? sumCost / sumBreak : 0;
+      const totalEbitda = ebCost - norm * ebDays; // прибыль по этапам, где известен срок
+      const stageEbitda = (it) => (it.days > 0 ? it.cost - norm * it.days : null);
+      const fmtPct = (x) => (x >= 0 ? "+" : "") + Math.round(x * 100) + "%";
+
+      return (
+        <aside className="sticky-summary lg:sticky lg:top-6 bg-night text-air p-6 sm:p-7 print-tight print-block print-mt">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-lg font-normal tracking-tight">Итог по КП</h3>
+            <button onClick={() => setShowTools((v) => !v)}
+              className={"no-print shrink-0 text-[10px] font-medium uppercase tracking-wide px-2.5 py-1 border transition " +
+                (showTools ? "bg-lilac text-night border-lilac" : "text-white/60 border-white/25 hover:text-white hover:border-white/50")}>
+              {showTools ? "Скрыть инструменты" : "Инструменты компании"}
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-2.5">
+            {/* Проектные услуги (интерьер / архитектура / благоустройство) */}
+            {items.map((it) => {
+              const dstate = discState[it.disc];
+              const pb = stagePayback(it.disc, it.key, dstate);
+              const md = stageMarketDelta(it.disc, it.key, dstate);
+              return (
+                <div key={it.disc + it.key}>
+                  <div className="flex items-start justify-between gap-3 text-sm">
+                    <div className="text-white/70">
+                      {DISC_META[it.disc].label} · {it.label}
+                      <span className="block text-xs text-white/40">{it.sub}</span>
+                    </div>
+                    <div className="font-medium whitespace-nowrap">{it.cost > 0 ? rub(it.cost) : "—"}</div>
+                  </div>
+                  {showTools && (
+                    <div className="no-print mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11px] font-light">
+                      <span className="text-white/40">окуп. компании:{" "}
+                        <span className={pb >= 1 ? "text-lilac" : "text-dawn"}>{pb > 0 ? Math.round(pb * 100) + "%" : "—"}</span>
+                      </span>
+                      <span className="text-white/40">к рынку РФ:{" "}
+                        <span className="text-white/70">{md == null ? "—" : fmtPct(md)}</span>
+                      </span>
+                      <span className="text-white/40">EBITDA:{" "}
+                        <span className={(() => { const e = stageEbitda(it); return e == null ? "text-white/70" : (e >= 0 ? "text-lilac" : "text-dawn"); })()}>
+                          {(() => { const e = stageEbitda(it); return e == null ? "—" : rub(e); })()}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Разделитель между разделами */}
+            {items.length > 0 && hasPresItems && (
+              <div className="border-t border-white/10 pt-1" />
+            )}
+
+            {/* Презентационные блоки */}
+            {BLOCKS.map((cfg) => {
+              const st = blocks[cfg.id];
+              if (!st.enabled) return null;
+              const p = effBlockPrice(cfg.id, st, params);
+              let sub;
+              if (cfg.mode === "area")
+                sub = "Аксонометрия · " + (st.area ? st.area + " м²" : "площадь не указана");
+              else if (cfg.mode === "duration")
+                sub = cfg.options[st.opt].name + " · " + durLabel(st.dur);
+              else sub = cfg.options[st.opt].name + " · " + st.count + " " + cfg.unitLabel;
+              return (
+                <div key={cfg.id} className="flex items-start justify-between gap-3 text-sm">
+                  <div className="text-white/70">
+                    {cfg.title}
+                    <span className="block text-xs text-white/40">{sub}</span>
+                  </div>
+                  <div className="font-medium whitespace-nowrap">{rub(p)}</div>
+                </div>
+              );
+            })}
+
+            {!hasAny && (
+              <div className="text-sm font-light text-white/40">Ни один блок не выбран.</div>
+            )}
+          </div>
+
+          {/* Инструменты компании — настройки экономики + сводка (только экран) */}
+          {showTools && (
+            <div className="no-print mt-4 bg-white/[0.06] border border-white/10 p-3.5">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide text-white/40">Себестоимость, ₽/мес</label>
+                  <input type="number" min="0" value={companyCost}
+                    onChange={(e) => setCompanyCost(e.target.value === "" ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    className="mt-1 w-full bg-transparent border-b border-white/25 text-white text-sm font-normal outline-none focus:border-lilac py-1" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide text-white/40">Проектов одновременно</label>
+                  <input type="number" min="1" value={companyProjects}
+                    onChange={(e) => setCompanyProjects(e.target.value === "" ? 1 : Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="mt-1 w-full bg-transparent border-b border-white/25 text-white text-sm font-normal outline-none focus:border-lilac py-1" />
+                </div>
+              </div>
+              <div className="mt-2.5 flex items-center justify-between text-[11px]">
+                <span className="text-white/50">Норма самоокупаемости</span>
+                <span className="text-white/80">{rub(norm)}/раб.день</span>
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between text-xs">
+                <span className="text-white/60">Окупаемость компании<span className="block text-[10px] text-white/35">по выбранным проектным услугам</span></span>
+                <span className={"text-2xl font-normal " + (compPayback >= 1 + COMPANY.targetMargin ? "text-lilac" : compPayback >= 1 ? "text-sun" : "text-dawn")}>
+                  {compPayback > 0 ? Math.round(compPayback * 100) + "%" : "—"}
+                </span>
+              </div>
+              <div className="mt-2 flex items-end justify-between">
+                <span className="text-xs text-white/60">EBITDA<span className="block text-[10px] text-white/35">прибыль до налога по этапам</span></span>
+                <span className={"text-2xl font-normal " + (totalEbitda >= 0 ? "text-lilac" : "text-dawn")}>
+                  {ebDays > 0 ? rub(totalEbitda) : "—"}
+                </span>
+              </div>
+              <p className="mt-2 text-[10px] font-light leading-snug text-white/35">
+                Норма = себестоимость ÷ (проектов × {WORKDAYS_PER_MONTH} раб.дн.). EBITDA этапа = стоимость − норма × срок
+                (сколько остаётся после самоокупаемости). «К рынку РФ» — отклонение от среднерыночной (с учётом площади).
+              </p>
+            </div>
+          )}
+
+          <div className="mt-5 pt-5 border-t border-white/15">
+            <div className="flex items-end justify-between">
+              <span className="text-sm font-light text-white/60">Итого</span>
+              <span className="text-3xl font-normal">
+                <AnimatedNumber value={total} format={rub} />
+              </span>
+            </div>
+
+            {/* Срок выполнения работ под итоговой суммой */}
+            {total > 0 && (
+              <div className="mt-1.5 flex items-center justify-end gap-2 text-xs font-light text-white/50">
+                {editingDays ? (
+                  <>
+                    <span>срок:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      autoFocus
+                      value={displayDays}
+                      onChange={(e) => setManualDays(e.target.value === "" ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0))}
+                      className="no-print w-16 bg-transparent border-b border-white/30 text-right text-white outline-none focus:border-lilac"
+                    />
+                    <span>раб. дн.</span>
+                    <button onClick={() => setEditingDays(false)} className="no-print text-lilac hover:text-white">OK</button>
+                    {manualDays != null && (
+                      <button onClick={() => { setManualDays(null); setEditingDays(false); }} className="no-print text-white/40 hover:text-white/70">авто</button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span>срок выполнения работ: {displayDays > 0 ? displayDays + " раб. дн." : "— раб. дн."}</span>
+                    <button onClick={() => setEditingDays(true)} className="no-print text-white/40 hover:text-white" title="Изменить срок">✎</button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="no-print mt-5">
+            <label className="flex items-center gap-2 cursor-pointer select-none mb-3">
+              <input type="checkbox" checked={showDate} onChange={(e) => setShowDate(e.target.checked)}
+                className="w-4 h-4 accent-lilac" />
+              <span className="text-xs font-light text-white/60">Ставить дату в КП</span>
+            </label>
+            <button onClick={() => window.print()} className="w-full bg-lilac text-night font-medium py-3 hover:brightness-95 transition">
+              Сформировать КП (PDF)
+            </button>
+          </div>
+
+          <p className="mt-4 text-[11px] font-light leading-snug text-white/40">
+            Проценты основаны на отраслевых исследованиях (мировой и российский рынок) и являются ориентиром,
+            а не гарантией. Итоговый результат зависит от продукта, цены и рынка.
+          </p>
+        </aside>
+      );
+    }
+
+    // Печатный макет КП (виден только при формировании PDF) — табличная подача
+    function PrintProposal({ kpTitle, discState, blocks, params, total, autoDays, presMasterChecked, showDate }) {
+      const dash = "1px dashed #bbb";
+      const fmtDays = (d) => (d > 0 ? d + " р.д." : "—");
+      const now = new Date();
+      const dateStr =
+        String(now.getDate()).padStart(2, "0") + "." +
+        String(now.getMonth() + 1).padStart(2, "0") + "." +
+        now.getFullYear();
+
+      // Позиции (виды работ)
+      const rows = [];
+      // Проектные услуги по дисциплинам (интерьер / архитектура / благоустройство)
+      DISC_LIST.forEach((disc) => {
+        const dstate = discState[disc];
+        DISC_STAGES[disc].forEach(([key, label, code]) => {
+          const s = dstate.stages[key];
+          if (!s || !s.enabled) return;
+          rows.push({
+            group: disc,
+            code,
+            name: label,
+            desc: s.manualDesc != null ? s.manualDesc : STAGE_DESC[disc][key],
+            cost: stageCost(disc, key, dstate),
+            days: stageDays(disc, key, dstate),
+          });
+        });
+      });
+      // Презентационные материалы
+      BLOCKS.forEach((cfg) => {
+        const st = blocks[cfg.id];
+        if (!st.enabled) return;
+        const desc = st.manualDesc != null ? st.manualDesc : (cfg.mode === "area" ? cfg.single.desc : cfg.options[st.opt].desc);
+        let spec;
+        if (cfg.mode === "area")
+          spec = "Аксонометрия · " + (st.area ? st.area + " м²" : "площадь не указана");
+        else if (cfg.mode === "duration") {
+          spec = cfg.options[st.opt].name + " · " + durLabel(st.dur);
+          if (st.clientModel) spec += " · модель Revit/ArchiCAD/3ds Max предоставляется заказчиком";
+        }
+        else
+          spec = cfg.options[st.opt].name + " · " + st.count + " " + cfg.unitLabel;
+        rows.push({ group: "pres", code: null, name: cfg.title, desc, spec, cost: effBlockPrice(cfg.id, st, params), days: effBlockDays(cfg.id, st, params) });
+      });
+
+      // Характеристики объекта — по каждой группе (дисциплине + презентации)
+      const groupLines = {};
+      DISC_LIST.forEach((disc) => {
+        const dstate = discState[disc];
+        const lines = [];
+        if (discAnyEnabled(dstate)) {
+          if (dstate.type && DISC_TYPES[disc].length > 1) lines.push({ t: dstate.type, head: true });
+          else lines.push({ t: DISC_META[disc].label, head: true });
+          if (dstate.area) lines.push({ t: "S ≈ " + dstate.area + " м²" });
+        }
+        groupLines[disc] = lines;
+      });
+      const presLines = [];
+      if (presMasterChecked) {
+        if (params.objectType) presLines.push({ t: params.objectType, head: true });
+        if (params.towers) presLines.push({ t: params.towers + " корп." });
+        if (params.area) presLines.push({ t: "S ≈ " + params.area + " м²" });
+        if (params.floors) presLines.push({ t: FLOOR_BANDS.find((b) => b.key === params.floors)?.label });
+      }
+      groupLines.pres = presLines;
+
+      // Группировка строк по группе (дисциплина или «pres») — характеристики
+      // выводятся отдельной ячейкой (rowSpan) в начале своей группы.
+      const grpInfo = {};
+      rows.forEach((r, i) => {
+        const g = r.group;
+        if (!grpInfo[g]) grpInfo[g] = { start: i, count: 0, lines: groupLines[g] || [] };
+        grpInfo[g].count++;
+      });
+
+      const th = "pb-2 pr-4 text-left align-bottom font-semibold uppercase tracking-[0.12em] text-[10.5px] text-ink";
+
+      return (
+        <div className="print-only text-ink px-1">
+          {/* Шапка: логотип + бюро */}
+          <div className="flex items-start justify-between pb-5">
+            <img src="LOGO.png" alt="rezeda"
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
+              style={{ filter: "brightness(0)" }}
+              className="h-9 w-auto object-contain object-left" />
+            <div className="text-right text-[10px] font-medium uppercase tracking-[0.2em] text-black/70 leading-tight">
+              Архитектурное<br />бюро
+            </div>
+          </div>
+
+          {/* Заголовок КП + название */}
+          <div className="flex items-start py-6" style={{ borderBottom: "1px dashed #999" }}>
+            <div className="w-[26%] pr-4 shrink-0 text-[15px] font-medium uppercase tracking-[0.04em] leading-tight">
+              Коммерческое<br />предложение
+            </div>
+            <div className="text-[13px] font-normal uppercase tracking-[0.04em] leading-snug text-black/80" style={{ maxWidth: "62mm" }}>
+              {kpTitle}
+            </div>
+          </div>
+
+          {/* Таблица позиций */}
+          <table className="w-full border-collapse text-[12px] mt-1">
+            <thead>
+              <tr style={{ borderBottom: dash }}>
+                <th className={th + " w-[24%]"}>Объект</th>
+                <th className={th}>Вид работ</th>
+                <th className={th + " w-[18%]"}>Стоимость</th>
+                <th className={th + " w-[13%]"}>Сроки</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr><td colSpan={4} className="py-6 text-[12px] font-light text-black/50">Ни одна позиция не выбрана.</td></tr>
+              )}
+              {rows.map((r, i) => {
+                const g = r.group;
+                const info = grpInfo[g];
+                const isGrpStart = info.start === i;
+                const lines = info.lines;
+                return (
+                <tr key={i} className="align-top" style={{ borderBottom: dash }}>
+                  {isGrpStart && (
+                    <td rowSpan={info.count} className="py-4 pr-6 align-top">
+                      {lines.length === 0
+                        ? <span className="text-[11px] text-black/40">—</span>
+                        : lines.map((o, j) => (
+                            <div key={j} className={o.head ? "font-medium text-[13px]" : "text-[11px] font-light text-black/60"}>{o.t}</div>
+                          ))}
+                    </td>
+                  )}
+                  <td className="py-4 pr-6">
+                    <div className="font-medium text-[12.5px]">{r.code ? r.code + " (" + r.name + ")" : r.name}</div>
+                    {r.spec && <div className="mt-0.5 text-[10.5px] font-medium text-black/75">{r.spec}</div>}
+                    <p className="mt-1 text-[10.5px] font-light leading-snug text-black/55 whitespace-pre-wrap">{r.desc}</p>
+                  </td>
+                  <td className="py-4 pr-4 align-top">
+                    <div className="font-medium whitespace-nowrap">{r.cost > 0 ? rub(r.cost) : "—"}</div>
+                    {r.note && <div className="mt-2 text-[9.5px] font-light leading-snug text-black/55">{r.note}</div>}
+                  </td>
+                  <td className="py-4 align-top whitespace-nowrap">{fmtDays(r.days)}</td>
+                </tr>
+                );
+              })}
+              {rows.length > 0 && (
+                <tr className="align-top" style={{ borderTop: "1.5px solid #000" }}>
+                  <td></td>
+                  <td className="py-3 font-medium uppercase tracking-[0.14em] text-[12px]">Итого</td>
+                  <td className="py-3 font-medium whitespace-nowrap">{rub(total)}</td>
+                  <td className="py-3 font-medium whitespace-nowrap">{fmtDays(autoDays)}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          {/* Примечания + дата — в правом нижнем углу */}
+          <div className="mt-12 flex justify-end">
+            <div className="text-right text-[10px] font-light text-black/40 leading-relaxed">
+              <p className="italic">Указанная стоимость работ может меняться при изменении состава работ.</p>
+              <p className="italic">Оплата работ осуществляется по договору в отношении 70%/30%.</p>
+              {showDate && <p className="mt-3 not-italic text-black/55">{dateStr}</p>}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* =========================================================================
+       КОРНЕВОЕ ПРИЛОЖЕНИЕ
+       ========================================================================= */
+    const initialParams = {
+      objectType: "",
+      towers: "",
+      area: "",
+      floors: "",
+    };
+    const makeInitialBlocks = (p) => ({
+      b1: { opt: "medium", count: recommend.b1(p), enabled: true },
+      b2: { area: "", enabled: true },
+      b3: { opt: "high", count: recommend.b3(p), enabled: true },
+      b4: { opt: "B", dur: "30s", clientModel: false, enabled: true },
+    });
+
+    // Плашка дисциплины: аккордеон + параметры проекта + карточки стадий
+    function DisciplinePlate({ disc, dstate, isOpen, onToggle, onParams, onStage, onReset }) {
+      const masterChecked = discAnyEnabled(dstate);
+      const toggleMaster = () => {
+        const v = !masterChecked;
+        DISC_STAGES[disc].forEach(([k]) => onStage(k, { enabled: v }));
+      };
+      return (
+        <Collapsible
+          label={DISC_META[disc].label}
+          isOpen={isOpen}
+          onToggle={onToggle}
+          checked={masterChecked}
+          onCheck={toggleMaster}
+          printHidden={!masterChecked}
+        >
+          <div className="px-0 pt-4 pb-4 space-y-4">
+            <DisciplineParams disc={disc} dstate={dstate} onChange={onParams} onReset={onReset} />
+            {DISC_STAGES[disc].map(([key, label]) =>
+              key === "nadzor" ? (
+                <NadzorCard key={key} disc={disc} stageLabel={label} dstate={dstate}
+                  sstate={dstate.stages[key]} onChange={(patch) => onStage(key, patch)} />
+              ) : (
+                <ServiceCard key={key} disc={disc} stageKey={key} stageLabel={label} dstate={dstate}
+                  sstate={dstate.stages[key]} onChange={(patch) => onStage(key, patch)} />
+              )
+            )}
+          </div>
+        </Collapsible>
+      );
+    }
+
+    function App() {
+      // Параметры и блоки «Презентационных материалов»
+      const [params, setParams] = useState(initialParams);
+      const [blocks, setBlocks] = useState(() => makeInitialBlocks(initialParams));
+
+      // Проектные дисциплины: интерьер / архитектура / благоустройство
+      const [discState, setDiscState] = useState(makeInitialDisc);
+      const updateDiscParams = (disc, patch) =>
+        setDiscState((prev) => ({ ...prev, [disc]: { ...prev[disc], ...patch } }));
+      const updateStage = (disc, key, patch) =>
+        setDiscState((prev) => ({
+          ...prev,
+          [disc]: { ...prev[disc], stages: { ...prev[disc].stages, [key]: { ...prev[disc].stages[key], ...patch } } },
+        }));
+      const resetDisc = (disc) =>
+        setDiscState((prev) => ({ ...prev, [disc]: makeInitialDisc()[disc] }));
+
+      // Название КП (вводится пользователем, попадает в PDF)
+      const [kpTitle, setKpTitle] = useState("");
+
+      // Инструменты компании (окупаемость / рынок) — переключатель в сводке
+      const [showTools, setShowTools] = useState(false);
+      // Экономика компании (редактируется в инструментах) → норма самоокупаемости.
+      // Синхронизируем модульный COMPANY, чтобы чистые функции ценообразования его читали.
+      const [companyCost, setCompanyCost] = useState(COMPANY.monthlyCost);
+      const [companyProjects, setCompanyProjects] = useState(COMPANY.projects);
+      COMPANY.monthlyCost = companyCost;
+      COMPANY.projects = companyProjects;
+      // COMPANY.targetMargin остаётся константой (0.5) — задаёт пол прибыли, окупаемость и EBITDA его показывают
+
+      // Дата в КП (галочка в чёрном блоке): по умолчанию ставится
+      const [showDate, setShowDate] = useState(true);
+
+      // Состояние аккордеонов (все закрыты по умолчанию)
+      const [archOpen, setArchOpen] = useState(false);
+      const [intOpen,  setIntOpen]  = useState(false);
+      const [landOpen, setLandOpen] = useState(false);
+      const [presOpen, setPresOpen] = useState(false);
+
+      const updateBlock = (id, patch) =>
+        setBlocks((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+
+      /* Параметры проекта пересчитывают рекомендуемое кол-во ракурсов */
+      useEffect(() => {
+        setBlocks((prev) => ({
+          ...prev,
+          b1: { ...prev.b1, count: recommend.b1(params) },
+          b3: { ...prev.b3, count: recommend.b3(params) },
+        }));
+      }, [params]);
+
+      // Итоговая стоимость: проектные дисциплины + презентация
+      const total = useMemo(() => {
+        const presTotal = BLOCKS.reduce((sum, cfg) => {
+          const st = blocks[cfg.id];
+          return st.enabled ? sum + effBlockPrice(cfg.id, st, params) : sum;
+        }, 0);
+        return discCostTotal(discState) + presTotal;
+      }, [discState, blocks, params, companyCost, companyProjects]);
+
+      // Срок выполнения работ (раб. дн.) — проектные дисциплины + презентация
+      const autoDays = useMemo(() =>
+        discDaysTotal(discState) +
+        BLOCKS.reduce((s, c) => s + (blocks[c.id].enabled ? effBlockDays(c.id, blocks[c.id], params) : 0), 0)
+      , [discState, blocks, params, companyCost, companyProjects]);
+      // Ручное переопределение срока (живёт в App, чтобы попасть и в КП-PDF)
+      const [manualDays, setManualDays] = useState(null);
+      const displayDays = manualDays != null ? manualDays : autoDays;
+
+      // Сброс параметров презентации (не задевая проектные дисциплины)
+      const resetParams = () => setParams(initialParams);
+
+      // Мастер-галочка «в КП» для презентационных материалов
+      const presMasterChecked = BLOCKS.some((c) => blocks[c.id].enabled);
+      const togglePresMaster = () => {
+        const v = !presMasterChecked;
+        setBlocks((prev) => {
+          const next = { ...prev };
+          BLOCKS.forEach((c) => { next[c.id] = { ...next[c.id], enabled: v }; });
+          return next;
+        });
+      };
+
+      return (
+        <div className="min-h-screen">
+          {/* Строка названия КП — самый верх интерфейса (в PDF не попадает) */}
+          <div className="no-print border-b border-concrete bg-steel">
+            <div className="max-w-6xl mx-auto px-6 py-3 flex items-center gap-3">
+              <label className="shrink-0 text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Название КП</label>
+              <input
+                value={kpTitle}
+                onChange={(e) => setKpTitle(e.target.value)}
+                placeholder="напр. На разработку интерьерной документации частного дома"
+                className="flex-1 hair bg-air px-3 py-2 text-sm font-normal outline-none focus:border-grape"
+              />
+            </div>
+          </div>
+
+          {/* ЭКРАННЫЙ ИНТЕРФЕЙС (в печати скрыт) */}
+          <div className="screen-only">
+          {/* HERO — только логотип и подпись */}
+          <header className="border-b border-concrete bg-air">
+            <div className="max-w-6xl mx-auto px-6 py-6 print-tight flex flex-col items-start gap-2">
+              <img
+                src="LOGO.png"
+                alt="rezeda"
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                style={{ filter: "brightness(0)" }}
+                className="h-8 sm:h-10 w-auto object-contain object-left"
+              />
+              <span className="text-xs font-medium uppercase tracking-[0.22em] text-black/50">
+                Коммерческое предложение
+              </span>
+            </div>
+          </header>
+
+          {/* ОСНОВНАЯ СЕТКА */}
+          <main className="max-w-6xl mx-auto w-full px-6 pt-8 pb-24">
+            <div id="blocks" className="print-mt grid lg:grid-cols-[1fr_360px] gap-8 print-gap items-start">
+
+              {/* Левая колонка: аккордеоны разделов */}
+              <div className="space-y-4 print-space min-w-0">
+
+                {/* ── АРХИТЕКТУРА ── */}
+                <DisciplinePlate
+                  disc="arch"
+                  dstate={discState.arch}
+                  isOpen={archOpen}
+                  onToggle={() => setArchOpen((v) => !v)}
+                  onParams={(patch) => updateDiscParams("arch", patch)}
+                  onStage={(k, patch) => updateStage("arch", k, patch)}
+                  onReset={() => resetDisc("arch")}
+                />
+
+                {/* ── ИНТЕРЬЕР ── */}
+                <DisciplinePlate
+                  disc="int"
+                  dstate={discState.int}
+                  isOpen={intOpen}
+                  onToggle={() => setIntOpen((v) => !v)}
+                  onParams={(patch) => updateDiscParams("int", patch)}
+                  onStage={(k, patch) => updateStage("int", k, patch)}
+                  onReset={() => resetDisc("int")}
+                />
+
+                {/* ── БЛАГОУСТРОЙСТВО ── */}
+                <DisciplinePlate
+                  disc="blago"
+                  dstate={discState.blago}
+                  isOpen={landOpen}
+                  onToggle={() => setLandOpen((v) => !v)}
+                  onParams={(patch) => updateDiscParams("blago", patch)}
+                  onStage={(k, patch) => updateStage("blago", k, patch)}
+                  onReset={() => resetDisc("blago")}
+                />
+
+                {/* ── ПРЕЗЕНТАЦИОННЫЕ МАТЕРИАЛЫ ── */}
+                <Collapsible
+                  label="Презентационные материалы"
+                  isOpen={presOpen}
+                  onToggle={() => setPresOpen((v) => !v)}
+                  checked={presMasterChecked}
+                  onCheck={togglePresMaster}
+                  printHidden={!presMasterChecked}
+                >
+                  <div className="pt-4 pb-4 space-y-4">
+                    {/* Параметры проекта для визуализации */}
+                    <ProjectParams params={params} setParams={setParams} onReset={resetParams} />
+
+                    {/* 4 блока визуализации */}
+                    {BLOCKS.map((cfg, i) => (
+                      <CalculatorBlock
+                        key={cfg.id}
+                        cfg={cfg}
+                        idx={i}
+                        params={params}
+                        blocks={blocks}
+                        state={blocks[cfg.id]}
+                        onChange={(patch) => updateBlock(cfg.id, patch)}
+                      />
+                    ))}
+                  </div>
+                </Collapsible>
+
+              </div>
+
+              {/* Правая колонка: итоговая панель */}
+              <SummaryBar
+                discState={discState}
+                blocks={blocks}
+                params={params}
+                total={total}
+                autoDays={autoDays}
+                manualDays={manualDays}
+                setManualDays={setManualDays}
+                displayDays={displayDays}
+                showTools={showTools}
+                setShowTools={setShowTools}
+                companyCost={companyCost}
+                setCompanyCost={setCompanyCost}
+                companyProjects={companyProjects}
+                setCompanyProjects={setCompanyProjects}
+                showDate={showDate}
+                setShowDate={setShowDate}
+              />
+            </div>
+          </main>
+          </div>
+          {/* ПЕЧАТНЫЙ МАКЕТ КП — виден только при формировании PDF */}
+          <PrintProposal
+            kpTitle={kpTitle}
+            discState={discState}
+            blocks={blocks}
+            params={params}
+            total={total}
+            autoDays={displayDays}
+            presMasterChecked={presMasterChecked}
+            showDate={showDate}
+          />
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
