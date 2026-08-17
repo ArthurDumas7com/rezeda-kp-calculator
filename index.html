@@ -550,6 +550,7 @@
         ["ep", "Эскизный проект", "ЭП"],
         ["rd", "Рабочая документация", "РД"],
         ["nadzor", "Авторский надзор", "НАДЗОР"],
+        ["custom", "Свой раздел", ""],
       ],
       arch: [
         ["od", "Обмерная документация", "ОД"],
@@ -557,11 +558,13 @@
         ["ep", "Эскизный проект", "ЭП"],
         ["rd", "Архитектурные решения", "АР"],
         ["nadzor", "Авторский надзор", "НАДЗОР"],
+        ["custom", "Свой раздел", ""],
       ],
       blago: [
         ["od", "Обмерная документация (топооснова)", "ОД"],
         ["mp", "Мастер-план", "МП"],
         ["gp", "Генеральный план", "ГП"],
+        ["custom", "Свой раздел", ""],
       ],
     };
 
@@ -665,6 +668,7 @@
     // dstate = { area, type, stages:{ key:{enabled, manualDays, manualDesc, manualPrice, mode, km} } }
     // Авторасчётная стоимость стадии (без ручного переопределения цены)
     const stageAutoCost = (disc, key, dstate) => {
+      if (key === "custom") return 0;   // свой раздел — только ручной ввод
       if (key === "nadzor") {
         const s = dstate.stages.nadzor;
         return s ? nadzorCost(s.mode, dstate.area, s.km) : 0;
@@ -677,8 +681,9 @@
       if (s && s.manualPrice != null) return s.manualPrice;
       return stageAutoCost(disc, key, dstate);
     };
+    // надзор — срок по договору/вручную; свой раздел — целиком вручную
     const stageAutoDays = (disc, key, dstate) =>
-      key === "nadzor" ? 0 : discDays(disc, key, dstate.area, dstate.type); // надзор — срок по договору/вручную
+      (key === "nadzor" || key === "custom") ? 0 : discDays(disc, key, dstate.area, dstate.type);
     const stageDays = (disc, key, dstate) => {
       const s = dstate.stages[key];
       return (s && s.manualDays != null) ? s.manualDays : stageAutoDays(disc, key, dstate);
@@ -690,6 +695,7 @@
       return d > 0 ? (c / d) / dayNorm() : 0;
     };
     const stageMarketDelta = (disc, key, dstate) => {
+      if (key === "custom") return null;   // свой раздел — нет рыночного эталона
       if (key === "nadzor") {
         const s = dstate.stages.nadzor;
         const m = s ? nadzorMarket(disc, s.mode, dstate.area) : 0;
@@ -701,11 +707,15 @@
       return m > 0 ? c / m - 1 : null;
     };
 
+    // Минимальная стоимость своего раздела по введённому сроку: маржа 50% сверх нормы.
+    const customMinPrice = (days) =>
+      days > 0 ? Math.round(floorPayback(false) * dayNorm() * days) : 0;
+
     // Подсказка по стоимости при ручном изменении срока (необязательная, с кнопкой «заменить»).
     // Меньше срок → пропорционально ниже цена. Больше срок → поднять, если окупаемость
     // упала ниже порога: 150% для этапов ≤ 5 млн, 130% — для дороже (пороги от нормы компании).
     const stageSuggestion = (disc, key, dstate) => {
-      if (key === "nadzor") return null;              // надзор — фикс/мес, без пересчёта по сроку
+      if (key === "nadzor" || key === "custom") return null; // фикс/мес и свой раздел — без пересчёта по сроку
       const s = dstate.stages[key];
       if (!s || s.manualDays == null) return null;    // только когда срок задан вручную
       const auto = stageAutoDays(disc, key, dstate);
@@ -737,7 +747,9 @@
           const s = dstate.stages[key];
           if (!s || !s.enabled) return;
           out.push({
-            disc, key, code, label,
+            disc, key, code,
+            // у своего раздела название вводит пользователь
+            label: key === "custom" ? (s.name || label) : label,
             cost: stageCost(disc, key, dstate),
             days: stageDays(disc, key, dstate),
             sub: dstate.type + (dstate.area ? " · " + dstate.area + " м²" : ""),
@@ -756,8 +768,8 @@
       DISC_LIST.forEach((disc) => {
         const stages = {};
         DISC_STAGES[disc].forEach(([k]) => {
-          stages[k] = k === "nadzor"
-            ? { enabled: false, mode: "consult", km: "" }
+          stages[k] = k === "nadzor" ? { enabled: false, mode: "consult", km: "" }
+            : k === "custom" ? { enabled: false, name: "", desc: "" }
             : { enabled: false };
         });
         d[disc] = { area: "", type: DISC_TYPES[disc][0], stages };
@@ -1199,6 +1211,76 @@
               <PriceCard autoPrice={autoCost} manualPrice={sstate.manualPrice} setManualPrice={(v) => onChange({ manualPrice: v })} />
               <DaysCard autoDays={0} manualDays={sstate.manualDays} setManualDays={(v) => onChange({ manualDays: v })} />
             </div>
+          </div>
+        </section>
+      );
+    }
+
+    // Свободный раздел: наименование, описание, стоимость и срок заполняются вручную.
+    // В КП попадает только если отмечен «в КП». Авторасчёта здесь нет по замыслу.
+    function CustomCard({ disc, sstate, onChange }) {
+      const filled = !!(sstate.name || sstate.desc || sstate.manualPrice != null || sstate.manualDays != null);
+      // По введённому сроку предлагаем минимальную стоимость с маржой 50%
+      const days = sstate.manualDays != null ? sstate.manualDays : 0;
+      const minPrice = customMinPrice(days);
+      const showHint = minPrice > 0 && (sstate.manualPrice == null || sstate.manualPrice < minPrice);
+      return (
+        <section className={"fade-up bg-air overflow-hidden print-block " +
+          (filled ? "hair" : "border border-dashed border-concrete")}>
+          <div className="px-6 sm:px-9 pt-8 pb-6 print-tight border-b border-concrete bg-steel">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-black/40">
+                  {DISC_META[disc].label} · свой раздел
+                </span>
+                <input
+                  value={sstate.name}
+                  onChange={(e) => onChange({ name: e.target.value })}
+                  placeholder="Наименование раздела"
+                  className="mt-2 w-full bg-transparent pb-1 text-2xl sm:text-3xl font-normal tracking-tight text-ink
+                             outline-none border-b border-concrete focus:border-grape placeholder:text-black/25"
+                />
+                <p className="mt-2 text-sm font-light text-black/45">Стоимость и срок задаются вручную</p>
+              </div>
+              <label className="no-print shrink-0 flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" checked={sstate.enabled} onChange={(e) => onChange({ enabled: e.target.checked })}
+                  className="w-5 h-5 accent-grape" />
+                <span className="text-xs font-medium uppercase tracking-wide text-black/50">в КП</span>
+              </label>
+            </div>
+          </div>
+          <div className="px-6 sm:px-9 py-7 print-tight">
+            <div className="bg-steel border-l-2 border-grape p-4">
+              <div className="text-sm font-medium text-ink">Описание услуги</div>
+              <textarea
+                value={sstate.desc}
+                onChange={(e) => onChange({ desc: e.target.value })}
+                rows={4}
+                placeholder="Опишите состав работ — текст попадёт в КП"
+                className="mt-2 w-full hair bg-air px-3 py-2 text-sm font-light leading-snug
+                           outline-none focus:border-grape resize-y placeholder:text-black/25"
+              />
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-4">
+              <PriceCard autoPrice={0} manualPrice={sstate.manualPrice}
+                setManualPrice={(v) => onChange({ manualPrice: v })} />
+              <DaysCard autoDays={0} manualDays={sstate.manualDays}
+                setManualDays={(v) => onChange({ manualDays: v })} />
+            </div>
+
+            {/* Подсказка: минимальная стоимость по сроку с маржой 50% */}
+            {showHint && (
+              <div className="no-print mt-4 flex flex-wrap items-center justify-between gap-3 p-3.5 bg-sun/20 border-l-2 border-sun">
+                <div className="text-sm font-light text-black/70">
+                  Минимальная стоимость при {days} раб. дн. (маржа 50%) —{" "}
+                  <span className="font-medium text-ink">{rub(minPrice)}</span>
+                </div>
+                <button onClick={() => onChange({ manualPrice: minPrice })}
+                  className="shrink-0 bg-night text-air text-xs font-medium uppercase tracking-wide px-3 py-2 hover:bg-grape transition">
+                  Применить
+                </button>
+              </div>
+            )}
           </div>
         </section>
       );
@@ -1685,11 +1767,14 @@
         DISC_STAGES[disc].forEach(([key, label, code]) => {
           const s = dstate.stages[key];
           if (!s || !s.enabled) return;
+          const isCustom = key === "custom";
           rows.push({
             group: disc,
             code,
-            name: label,
-            desc: s.manualDesc != null ? s.manualDesc : STAGE_DESC[disc][key],
+            name: isCustom ? (s.name || "Дополнительный раздел") : label,
+            desc: isCustom
+              ? (s.desc || "")
+              : (s.manualDesc != null ? s.manualDesc : STAGE_DESC[disc][key]),
             cost: stageCost(disc, key, dstate),
             days: stageDays(disc, key, dstate),
           });
@@ -1870,6 +1955,9 @@
             {DISC_STAGES[disc].map(([key, label]) =>
               key === "nadzor" ? (
                 <NadzorCard key={key} disc={disc} stageLabel={label} dstate={dstate}
+                  sstate={dstate.stages[key]} onChange={(patch) => onStage(key, patch)} />
+              ) : key === "custom" ? (
+                <CustomCard key={key} disc={disc}
                   sstate={dstate.stages[key]} onChange={(patch) => onStage(key, patch)} />
               ) : (
                 <ServiceCard key={key} disc={disc} stageKey={key} stageLabel={label} dstate={dstate}
