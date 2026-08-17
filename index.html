@@ -114,6 +114,43 @@
 
     /* Печатный макет КП — виден только при печати */
     .print-only { display: none; }
+
+    /* =====================================================================
+       ДОКУМЕНТ ДОГОВОРА (вкладка «Договор»)
+       Геометрия 1:1 с их Word-шаблоном: A4, поля 18/15/18/20 мм, Inter 9pt.
+       Колонтитулы сделаны через thead/tfoot таблицы .doc-frame — только так
+       браузер повторяет их на каждой странице PDF.
+       ===================================================================== */
+    .doc { font-size: 9pt; line-height: 1.3; color: #000; }
+    .doc-sheet { width: 210mm; margin: 0 auto; background: #fff; padding: 18mm 15mm 18mm 20mm;
+                 border: 1px solid #D9D9D9; }
+    /* на экране разделяем части документа (договор / приложения) */
+    .doc-next { margin-top: 12mm; border-top: 1px dashed #D9D9D9; }
+    .doc-next > thead td { padding-top: 12mm; }
+    .doc-frame { width: 100%; border-collapse: collapse; }
+    .doc-frame > thead td, .doc-frame > tfoot td { padding: 0; border: 0; }
+    .doc p { margin: 0 0 2.5pt; text-align: justify; }
+    .doc .dc { text-align: center; }
+    .doc .dr { text-align: right; }
+    .doc .db { font-weight: 500; }
+    .doc .di { padding-left: 7mm; }
+    .doc .di2 { padding-left: 12mm; }
+    .doc .dat { font-weight: 500; margin-top: 6pt; }
+    .doc table.dt { width: 100%; border-collapse: collapse; margin: 3pt 0 5pt; }
+    .doc table.dt td { vertical-align: top; padding: 1.5pt 5pt 1.5pt 0; }
+    .doc .keep { break-inside: avoid; page-break-inside: avoid; }
+    .doc-foot { text-align: center; font-size: 9pt; }
+
+    @media print {
+      /* @page даёт 10 мм; добираем до 20/15 мм отступами рамки, а вертикальные
+         поля — паддингами колонтитулов (они есть на каждой странице) */
+      .doc-sheet { width: auto; padding: 0; margin: 0; border: 0; }
+      .doc-frame { margin-left: 10mm; margin-right: 5mm; }
+      .doc-next { margin-top: 0; border-top: 0; }
+      .doc-next > thead td { padding-top: 0; }
+      .doc-hpad { padding-bottom: 3.7mm !important; }
+      .doc-fpad { padding-top: 4mm !important; }
+    }
   </style>
 </head>
 <body class="font-sans antialiased">
@@ -1969,7 +2006,7 @@
       );
     }
 
-    function App() {
+    function App({ snapRef }) {
       // Параметры и блоки «Презентационных материалов»
       const [params, setParams] = useState(initialParams);
       const [blocks, setBlocks] = useState(() => makeInitialBlocks(initialParams));
@@ -2040,6 +2077,13 @@
 
       // Сброс параметров презентации (не задевая проектные дисциплины)
       const resetParams = () => setParams(initialParams);
+
+      /* Снимок данных КП для вкладки «Договор» (кнопка «Перенести из КП»).
+         Пишем в ref, а не в состояние — чтобы не перерисовывать вкладку договора
+         на каждое движение в калькуляторе. */
+      useEffect(() => {
+        if (snapRef) snapRef.current = kpSnapshot(discState, kpTitle);
+      }, [discState, kpTitle, companyCost, companyProjects]);
 
       // Мастер-галочка «в КП» для презентационных материалов
       const presMasterChecked = BLOCKS.some((c) => blocks[c.id].enabled);
@@ -2192,7 +2236,1660 @@
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    /* =========================================================================
+       ДОГОВОР — 1/3: данные, числа прописью, текст документа
+
+       Формат документа собирается из ОДНОГО дерева блоков (docTree), которое
+       затем рендерится двумя способами: в HTML (предпросмотр + печать в PDF) и
+       в .docx (библиотека docx, подгружается с CDN по кнопке). Любая правка
+       формулировок делается в docTree — и сразу попадает в оба вывода.
+
+       Источник текста — 4 шаблона бюро: «архитектура типовой», «архитектура
+       ФОРТУНА», «дизайн-проект типовой», «дизайн ФОРТУНА» + заполненный
+       договор 8_26 (Ликон-2). Различия форматов:
+         • дисциплина (arch / int) — определения, ст. 2, ст. 5, ст. 9, состав
+           исходных данных, названия полей Приложения №1;
+         • «ФОРТУНА» = галочка «неразглашение» (отсрочка публикации портфолио)
+           + Приложение №2 (налоговые заверения и НДС).
+       ========================================================================= */
+
+    // Логотип REZEDA (чёрный вордмарк 208×30 из колонтитула их шаблонов).
+    // Вшит base64: страница открывается с file://, где fetch/canvas к локальным
+    // картинкам запрещены, а картинка нужна и в предпросмотре, и внутри .docx.
+    const DOC_LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAANAAAAAeCAMAAABqmGCCAAADAFBMVEUAAAAAAAAAAAAAAAAAAAAgICAcHBwaGhoXFxcVFRUUFBQQEBAODg4NDQ0aGhoVFRUUFBQSEhIREREQEBAQEBAXFxcVFRUTExMSEhIREREREREWFhYVFRUUFBQUFBQTExMSEhISEhIWFhYVFRUVFRUVFRUUFBQTExMTExMTExMSEhISEhIVFRUVFRUUFBQUFBQTExMTExMTExMVFRUVFRUUFBQUFBQTExMTExMTExMTExMVFRUUFBQUFBQTExMTExMTExMVFRUVFRUVFRUUFBQUFBQUFBQTExMTExMVFRUUFBQUFBQUFBQTExMVFRUUFBQUFBQUFBQUFBQUFBQTExMTExMVFRUUFBQUFBQUFBQUFBQUFBQTExMTExMVFRUVFRUUFBQUFBQUFBQUFBQTExMVFRUUFBQUFBQUFBQUFBQUFBQUFBQVFRUUFBQUFBQUFBQUFBQUFBQUFBQTExMVFRUUFBQUFBQUFBQUFBQUFBQUFBQUFBQTExMVFRUUFBQUFBQUFBQUFBQUFBQUFBQTExMUFBQUFBQUFBQUFBQUFBQUFBQTExMUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB2cnKQAAAAlXRSTlMAAgMEBQgJCgsMDRASFBQYGhweHyAiJCgqLC0uMDI0Njg5Ojw9PkBCQ0RFRkhKTE1PUFFUV1hZXF1fYGNkaGlrbG1ub3BxdHh5fH5/gYOHiouNjo+RkpOWl5qbnJ2foKGjp6iqq66vsrO1tre6u7y9v8DDxcfIycvMzc7P0tPW19rb3N3f4OHj5+nr7O/x8/T3+Pr7/TJkywIAAAesSURBVHhepVhrbFRVEJ52WZaydLdL63b7oKVFEITSVKRLq6S0CiEakZcYgooPNCb80Gj85x8TNWpMfBB++cdHjImkEl4FcenDQq0PaGmBUkrtUvpmke2267auXT1n5t7dc8/eu9vo9+PMuTNn5945M2dmzqaAAMeaHFtaBoDP7+0eFgUEc06xax4Tw1RwevjGrZAsnxVEJWPe0f+ixJyzbIHDjtM/Q/6hIc2nprzNx0YPW1Zzf64g6G1oE54AMlfcsyJNZIS7e7tuKvPnSL0RPJeUSZySSHfP1RvK3PG6KGHwAYzd7BuQuGVrS1K1nGDLWV/0IeUgH+troaxiZZRJ+KX59+jc9NBmiyBSEDl3LIiTtx2SRIvDHiT6SqD1SABp1luSgDDS2BqOPVn3lMYeYmg+orra9Cgfu3oe3p0tyBF5JZ30uQD5L7vnaGSElMJ1fXf4pEaz7XG4gJ40UAL5Fb4RTlM2yhLEglW5U7fUh4JXFwuiGApXX1W+VfHeksclN3Kkv2yjSdneAq0kivTnKmWWDv7kg7ES65PrOTHclNUvLFFm+W8YhYLrRTNNaM+s+7g9gc5LQ8GQOcvl3ECWODfWclLwtBopI6MjM+ORVLvJVaBoduzsHVWEhoh0g6jENzgWJiV5WcRJ33XTC2CcHyw7ans5Ne1Vtn1k2Hd7hlEH3JVVSLzcbd8iJYPWM2bo9Bm+BsLDw1C/aSMavKF5jI276VN8nksYX4R893pcYtl1gB0SvbMBZfcSPcU/VVXS3B47wJDtrkElqTs/VD105EJUutCRYS9HbuEjBzjZhFlruu688B1gK33Mymnl9+OckEHMnp66a7FF4RNDu7iTUt3HANwYKpHjHrRXxcBA0zMYCctXdMF5UaLAtFWxp+0EqEqg7rRwwAFGjza/UMQnRWvOKx6ajNnLZy3uCm7S3atYojTbW9l05ow2JALNF15zMWquPMkfKSkATBwYEhYxp6as4GTuOYCX5vPZFz/+o1nATkb7Uoy70GVJgCja+gDSac+Jv0BVcuRURFzDMHV5LbpuugPs1XzSqZYCQqALljOSOtPB9vRSB0M0U0UR9j7IyYJmPqq54Cj6S4Cnj48FVnBioLf+qhVzhD7H7UbLZZTvXIN0uPbYBCOk5OJpcQlh/CAqWWl4htqwEBXpJK0o+nv46KLoJdZIS0ys4DqOVihBqpZGDXxYqDLmyXywbN6xGCcdh84hJSUdqlzEACpJzzDKcrdwK7MXynwRV/iQioVHqQy/xYQqKFIXjlH7IBwwASP3sGFu2pTEdlVjDAA0NCkVhJTwbBcPVAJzZXYUl7fxsVA5W6ZFy7Kc2ZSFQ1N+3+jNrhnAOgZ53JeKQTqnuuMTPg5CJie+NN3949HE3iFxS6ooCv2NHvXcoZKgSUnTWpCSDJ5PdTEW4WFEZSK/ukxIqGlpDpZSJlrr6Vjhd5BBU/7YKhVBxSkYUAZtCUEKuarqu5Beb4plYFxiTaTE8AzBzATvFLkG8xOUaLRI3+jmeRQA8w4ZNMkTkQEWyIw4aCLOUVVDHvu5XmgrkytJgBA3iEWI+RVM8fGw7UaCviODqDvUh5xo4yF6aEl1GdJQQ6OYXpMrSdD64Ieyl2yL2hMapzi1pM+XS3pyg4IY/7OEewMV0MGGnzT82SgxCjnAgxhgvsen6dYr/cL32nOL7+N1VQUZFFerBEzzISKXKRHRX8+vqsE4hvZGrAwxJFfyl7GHsLP5G9bhQ+BTzX0Oxse7TlTuxuqDkUIG4fsMMMmH8JsyWwe5NRVI/znT9IckIlPeMXRCItgwqoKQh08f6WTDlsWYLHAzExVggpcPFqPWX0DpE2TP7drDsj2AbUfqIpk9K9Dd4Tolljs69rD7XGyqe+XSgHq8sn6JHYeaairm3U0XJQkDJbwy/fKswMB9c9byMeCnvY/bKgTlWay2yT3Ugy+qUu9YBsjcvp3saTmkYw9cx6xUkVCJwRkqwTt33yRgz1eg3OO0oL4+nw/JPRRueISNlv0H8Y4lwv5UDidfsn237aOYjBz/XrMkivrH2WDe/5X2nxcQleh6yFxBccxamVu87TbX6LxgCdVbG79jJDcIGqv53ln2N3R6Rbat/CH0cec1fpUke6a/u6rX3QRDcG4TKnn+h8uafRGVxHnI7Mh0lC/FaT8zqBsv6lty6rTHyFzkLlfi7NmzN4LRf30SoHKPMgl03vbzy6LDlO7MVq6+0+/6hBX6+LpFWBJsJyV2s6TE+kH0BzLGDrF+2vwO5m/2NDgM47xUm2zzbLku7amZhYegJXMzTWw6rdQp3gUnPBuUT6NKrEZK4jwUReQovx+Ev9lHj04ndSMC6ovULiJ5UmA4dtyodQl/jXe2u2W+FvivT1IlumeIw/sFnby2w0Ya6mu/Uq/2s/EQwMmuvU6Zx+H7jPKxfIGQQO3Dyc49utVMVWKAwfaLg8rU079Frz0dqmuD0Y/30J1rdgaB961V60plb95p/tFwV/Uw8P6yB0rltBtTEh9yE3/7r/3ere49w7UPC0qKizT96FBvN/rP+97K4mJWOVJEYWJY8wpyMu3meWkQmJm44x/o0zZVs4PVtSjXmW75X0oc9kyLycZbw8Bk3L/9/wKvDVbtULVMmQAAAABJRU5ErkJggg==";
+    const DOC_LOGO_URI = "data:image/png;base64," + DOC_LOGO_B64;
+    const DOC_FOOTER_TEXT = "Исполнитель _______________________                                     Заказчик _______________________";
+
+    /* ── Числа: разряды, прописью, падежи ─────────────────────────────────── */
+    const plural = (n, forms) => {
+      const a = Math.abs(Math.round(n)) % 100, b = a % 10;
+      if (a > 10 && a < 20) return forms[2];
+      if (b > 1 && b < 5) return forms[1];
+      if (b === 1) return forms[0];
+      return forms[2];
+    };
+    const W_ONES = [
+      ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"],
+      ["", "одна", "две", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"],
+    ];
+    const W_TEENS = ["десять", "одиннадцать", "двенадцать", "тринадцать", "четырнадцать",
+      "пятнадцать", "шестнадцать", "семнадцать", "восемнадцать", "девятнадцать"];
+    const W_TENS = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят",
+      "семьдесят", "восемьдесят", "девяносто"];
+    const W_HUND = ["", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот",
+      "семьсот", "восемьсот", "девятьсот"];
+    // f=1 → женский род разряда («одна тысяча», «две тысячи»)
+    const W_SCALE = [null,
+      { f: 1, w: ["тысяча", "тысячи", "тысяч"] },
+      { f: 0, w: ["миллион", "миллиона", "миллионов"] },
+      { f: 0, w: ["миллиард", "миллиарда", "миллиардов"] }];
+
+    const triadWords = (n, fem) => {
+      const out = [];
+      const h = Math.floor(n / 100), t = Math.floor((n % 100) / 10), o = n % 10;
+      if (h) out.push(W_HUND[h]);
+      if (t === 1) out.push(W_TEENS[o]);
+      else {
+        if (t) out.push(W_TENS[t]);
+        if (o) out.push(W_ONES[fem ? 1 : 0][o]);
+      }
+      return out;
+    };
+    // 1870000 → «один миллион восемьсот семьдесят тысяч»
+    const numWords = (num) => {
+      let n = Math.floor(Math.abs(num || 0));
+      if (n === 0) return "ноль";
+      const triads = [];
+      while (n > 0) { triads.push(n % 1000); n = Math.floor(n / 1000); }
+      const parts = [];
+      for (let i = triads.length - 1; i >= 0; i--) {
+        const t = triads[i];
+        if (!t) continue;
+        const sc = W_SCALE[i];
+        triadWords(t, sc && sc.f === 1).forEach((w) => parts.push(w));
+        if (sc) parts.push(plural(t, sc.w));
+      }
+      return parts.join(" ");
+    };
+    // Родительный падеж для «в течение 3 (трех) рабочих дней»
+    const GEN_ONES = ["", "одного", "двух", "трех", "четырех", "пяти", "шести", "семи", "восьми", "девяти"];
+    const GEN_TEENS = ["десяти", "одиннадцати", "двенадцати", "тринадцати", "четырнадцати",
+      "пятнадцати", "шестнадцати", "семнадцати", "восемнадцати", "девятнадцати"];
+    const GEN_TENS = ["", "", "двадцати", "тридцати", "сорока", "пятидесяти", "шестидесяти",
+      "семидесяти", "восьмидесяти", "девяноста"];
+    const genWords = (num) => {
+      const n = Math.floor(Math.abs(num || 0));
+      if (n < 10) return GEN_ONES[n] || "нуля";
+      if (n < 20) return GEN_TEENS[n - 10];
+      if (n < 100) {
+        const t = Math.floor(n / 10), o = n % 10;
+        return (GEN_TENS[t] + (o ? " " + GEN_ONES[o] : "")).trim();
+      }
+      return numWords(n);
+    };
+
+    const nsp = (v) => String(v).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    const mon0 = (n) => nsp(Math.round(n || 0));                       // 1 870 000
+    const mon2 = (n) => {                                              // 89 047,62
+      const v = (Math.round((n || 0) * 100) / 100).toFixed(2).split(".");
+      return nsp(v[0]) + "," + v[1];
+    };
+    const NDS_RATE = 5;
+    const ndsOf = (sum) => Math.round((sum || 0) * NDS_RATE / (100 + NDS_RATE) * 100) / 100;
+    // «1 870 000 (один миллион восемьсот семьдесят тысяч) руб.» + НДС при УСН+НДС 5%
+    const cash = (n, nds) =>
+      mon0(n) + " (" + numWords(n) + ") руб." +
+      (nds && n > 0 ? ", в том числе НДС " + NDS_RATE + "% в размере " + mon2(ndsOf(n)) + " рублей" : "");
+    const daysNom = (n) =>
+      mon0(n) + " (" + numWords(n) + ") " + plural(n, ["рабочий день", "рабочих дня", "рабочих дней"]);
+    const daysIn = (n) =>
+      "в течение " + mon0(n) + " (" + genWords(n) + ") " + plural(n, ["рабочего дня", "рабочих дней", "рабочих дней"]);
+
+    const MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня",
+      "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+    // "2026-04-20" → «20 апреля 2026»
+    const dmy = (iso) => {
+      if (!iso) return "";
+      const p = String(iso).split("-");
+      if (p.length !== 3) return iso;
+      return String(Number(p[2])) + " " + MONTHS_GEN[Number(p[1]) - 1] + " " + p[0];
+    };
+    const dmyDot = (iso) => {
+      if (!iso) return "";
+      const p = String(iso).split("-");
+      if (p.length !== 3) return iso;
+      return p[2] + "." + p[1] + "." + p[0];
+    };
+    const yearOf = (iso) => (iso && String(iso).split("-")[0]) || String(new Date().getFullYear());
+
+    /* ── Справочники и заготовки ──────────────────────────────────────────── */
+    const DOC_DISC = {
+      arch: {
+        label: "Архитектура",
+        title: "на разработку архитектурного проекта",
+        appTitle: "на разработку архитектурного проекта",
+        addrLabel: "Адрес Объекта:",
+        areaLabel: "Предварительная Площадь Объекта:",
+        totalLabel: "Общая цена работ\n(по Предварительной площади):",
+        sources: "Отчет о проведении геологических изысканий.\nОтчет о проведении геодезических изысканий.\nТехнические условия подключения к существующим коммуникациям.",
+        edits: [3, 2, 2, 2, 2, 2, 2, 2],
+      },
+      int: {
+        label: "Интерьер (дизайн-проект)",
+        title: "на разработку дизайн-проекта (художественного оформления интерьера)",
+        appTitle: "на разработку проекта художественного оформления интерьера",
+        addrLabel: "Адрес Объекта дизайна:",
+        areaLabel: "Площадь Объекта:",
+        totalLabel: "Общая цена работ:",
+        sources: "План БТИ (либо план от застройщика);\nСхемы текущей разводки коммуникаций и инженерных систем;\nТехнические условия (ТУ) в отношении электроснабжения.",
+        edits: [2, 2, 2, 2, 2, 2, 2, 2],
+      },
+    };
+    const TAX_MODES = [
+      ["usn", "УСН (НДС не облагается)"],
+      ["patent", "Патент (НДС не облагается)"],
+      ["nds5", "УСН + НДС 5% (п. 8 ст. 164 НК РФ)"],
+    ];
+    const TAX_SENTENCE = {
+      usn: " Оплата по договору НДС не облагается в связи с применением Исполнителем упрощенной системы налогообложения.",
+      patent: " Оплата по Договору НДС не облагается в связи с применением Исполнителем патентной системы налогообложения.",
+      nds5: "",
+    };
+
+    const uid = () => "id" + Math.random().toString(36).slice(2, 9);
+
+    const emptyExec = () => ({
+      id: uid(), profile: "Новый профиль", kind: "ip", name: "", regDate: "", inn: "", ogrn: "",
+      addr: "", account: "", bank: "", bik: "", corr: "", email: "", phone: "",
+      signerTitle: "Индивидуальный предприниматель", signerName: "", signerShort: "", tax: "usn",
+    });
+    const emptyClient = () => ({
+      id: uid(), profile: "Новый заказчик", kind: "person", name: "", inn: "", kpp: "", ogrn: "",
+      regDate: "", addr: "", passport: "", bank: "", bik: "", account: "", corr: "",
+      email: "", phone: "", signerTitle: "", signerName: "", signerShort: "",
+      basis: "Устава", viaMc: false, mcName: "",
+    });
+
+    // Предзаполненные профили Исполнителя (реквизиты из договора 8_26 и шаблонов)
+    const PRESET_EXECS = [
+      Object.assign(emptyExec(), {
+        id: "exec-galin", profile: "ИП Галин Д.С.", kind: "ip",
+        name: "Галин Дмитрий Сергеевич", regDate: "21.12.2016",
+        inn: "380101026220", ogrn: "316385000153095",
+        addr: "665835, Иркутская обл, Ангарск г, Ленинградский пр-кт, дом № 15, кв. 72",
+        account: "40802810712500015766", bank: 'ООО "Банк Точка"',
+        bik: "044525104", corr: "30101810745374525104",
+        email: "rzda.studio@gmail.com", phone: "",
+        signerTitle: "Индивидуальный предприниматель", signerShort: "Д.С. Галин", tax: "nds5",
+      }),
+      Object.assign(emptyExec(), {
+        id: "exec-moroz", profile: "ИП Мороз А.В.", kind: "ip",
+        name: "Мороз Анна Владимировна", regDate: "30.09.2019",
+        inn: "381003279270", ogrn: "319385000096121",
+        email: "rzda.studio@gmail.com",
+        signerTitle: "Индивидуальный предприниматель", signerShort: "А.В. Мороз", tax: "patent",
+      }),
+    ];
+
+    // Заказчики из присланных договоров — сразу доступны в справочнике.
+    // У ИП Чекотовой в шаблонах ФОРТУНА указаны только ФИО и подпись,
+    // ИНН/ОГРНИП нужно дозаполнить один раз и нажать «Сохранить».
+    const PRESET_CLIENTS = [
+      Object.assign(emptyClient(), {
+        id: "cli-aziasibinvest", profile: "ООО «АзияСибИнвест»", kind: "ooo",
+        name: "АзияСибИнвест", inn: "3849073269", kpp: "384901001", ogrn: "1193850012817",
+        addr: "664035, г. Иркутск, ул. Челябинская, д. 25, офис 301",
+        bank: "Байкальский банк ПАО Сбербанк", bik: "042520607",
+        account: "40702810718350029439", corr: "30101810900000000607",
+        email: "chief.ov@all38.pro", phone: "+79021722747",
+        signerTitle: "генерального директора", signerName: "Чекотовой Нины Александровны",
+        signerShort: "Н.А. Чекотова", basis: "Устава", viaMc: true, mcName: "Ретейл Групп",
+      }),
+      Object.assign(emptyClient(), {
+        id: "cli-chekotova-ip", profile: "ИП Чекотова Н.А.", kind: "ip",
+        name: "Чекотова Нина Александровна", signerShort: "Н.А. Чекотова",
+      }),
+    ];
+
+    const emptyStage = (disc, i) => ({
+      id: uid(), name: "", results: "", price: "", days: "",
+      edits: (DOC_DISC[disc].edits[i] != null ? DOC_DISC[disc].edits[i] : 2),
+      advance: null, // null → берётся общий аванс
+    });
+
+    const initialDocForm = () => ({
+      disc: "arch",
+      num: "", date: new Date().toISOString().slice(0, 10), city: "г. Иркутск",
+      subtitle: "",
+      exec: Object.assign({}, PRESET_EXECS[0]),
+      client: emptyClient(),
+      objAddr: "", objCad: "", area: "", rateManual: "",
+      sources: DOC_DISC.arch.sources,
+      objDesc: "",
+      repName: "", repEmail: "", repPhone: "",
+      stages: [emptyStage("arch", 0), emptyStage("arch", 1), emptyStage("arch", 2)],
+      advance: 70, payDays: 3,
+      termMode: "days", dateFrom: "", dateTo: "",
+      court: "Арбитражный суд Иркутской области",
+      nda: false, ndaYears: 3, app2: false, formula: true,
+    });
+
+    /* ── Снимок КП (заполняется на вкладке калькулятора) ──────────────────── */
+    function kpSnapshot(discState, kpTitle) {
+      const items = enabledStageItems(discState).map((it) => {
+        const s = discState[it.disc].stages[it.key];
+        const desc = (s && s.manualDesc != null)
+          ? s.manualDesc
+          : ((STAGE_DESC[it.disc] && STAGE_DESC[it.disc][it.key]) || "");
+        return { disc: it.disc, label: it.label, desc, cost: it.cost, days: it.days };
+      });
+      const area = {};
+      DISC_LIST.forEach((d) => { area[d] = discState[d].area; });
+      return { items, area, title: kpTitle || "" };
+    }
+
+    /* ── Модель: то, что посчитано из формы ───────────────────────────────── */
+    function docModel(f) {
+      const stages = f.stages.map((s) => ({
+        id: s.id,
+        name: s.name,
+        results: String(s.results || "").split("\n").map((x) => x.trim()).filter(Boolean),
+        price: Number(s.price) || 0,
+        days: Number(s.days) || 0,
+        edits: Number(s.edits) || 0,
+        advance: s.advance == null ? Number(f.advance) || 0 : Number(s.advance) || 0,
+      }));
+      const total = stages.reduce((a, s) => a + s.price, 0);
+      const days = stages.reduce((a, s) => a + s.days, 0);
+      const area = Number(f.area) || 0;
+      const rate = f.rateManual !== "" && f.rateManual != null
+        ? Number(f.rateManual) || 0
+        : (area > 0 ? Math.round(total / area) : 0);
+      return {
+        f, disc: f.disc, d: DOC_DISC[f.disc],
+        stages, total, days, area, rate,
+        nds: f.exec.tax === "nds5",
+        sources: String(f.sources || "").split("\n").map((x) => x.trim()).filter(Boolean),
+        objDesc: String(f.objDesc || "").split("\n").map((x) => x.trim()).filter(Boolean),
+      };
+    }
+
+    /* ── Преамбула: описание сторон ───────────────────────────────────────── */
+    const partySentence = (p, role) => {
+      // role: 'client' | 'exec'
+      const isC = role === "client";
+      const nameOf = () => p.name || (isC ? "___________________________________" : "_________________________________");
+      let s = "";
+      if (p.kind === "ooo") {
+        s = "Общество с ограниченной ответственностью «" + nameOf() + "»" + (p.inn ? " (ИНН " + p.inn + ")" : "");
+        if (p.viaMc && p.mcName) {
+          s += ", в лице " + (p.signerTitle || "генерального директора") + " управляющей компании ООО «" + p.mcName + "» " +
+            (p.signerName || "") + ", действующего на основании " + (p.basis || "Устава");
+        } else if (p.signerName) {
+          s += ", в лице " + (p.signerTitle || "генерального директора") + " " + p.signerName +
+            ", действующего на основании " + (p.basis || "Устава");
+        }
+        s += ", именуемое в дальнейшем «" + (isC ? "Заказчик" : "Исполнитель") + "»";
+      } else if (p.kind === "ip") {
+        s = "индивидуальный предприниматель " + nameOf() + (p.inn ? " (ИНН " + p.inn + ")" : "");
+        if (p.regDate) s += ", зарегистрированный в качестве индивидуального предпринимателя " + p.regDate;
+        if (p.ogrn) s += ", ОГРНИП " + p.ogrn;
+        s += ", именуемый в дальнейшем «" + (isC ? "Заказчик" : "Исполнитель") + "»";
+      } else {
+        s = nameOf();
+        if (p.passport) s += ", паспорт " + p.passport;
+        if (p.addr) s += ", зарегистрированный (-ая) по адресу: " + p.addr;
+        s += ", именуемый (-ая) в дальнейшем «Заказчик»";
+      }
+      s += isC
+        ? ", с одной стороны, и"
+        : ", с другой стороны, совместно именуемые «Стороны», заключили настоящий договор на следующих условиях:";
+      return s;
+    };
+
+    /* ── Реквизиты в подвале договора ─────────────────────────────────────── */
+    const kv = (label, v) => (v ? label + " " + v : null);
+    const execReqLines = (p) => {
+      const L = [];
+      L.push(p.kind === "ooo" ? "ООО «" + (p.name || "") + "»" : "Индивидуальный предприниматель");
+      if (p.kind !== "ooo" && p.name) L.push(p.name);
+      L.push(kv("ИНН:", p.inn));
+      L.push(kv(p.kind === "ooo" ? "ОГРН:" : "ОГРНИП:", p.ogrn));
+      if (p.kind === "ooo") L.push(kv("КПП:", p.kpp));
+      L.push(kv("Адрес:", p.addr));
+      L.push(kv("р/с:", p.account));
+      L.push(kv("в:", p.bank));
+      L.push(kv("БИК:", p.bik));
+      L.push(kv("к/с:", p.corr));
+      L.push(kv("e-mail:", p.email));
+      L.push(kv("тел.:", p.phone));
+      return L.filter(Boolean);
+    };
+    const clientReqLines = (p) => {
+      const L = [];
+      if (p.kind === "ooo") {
+        L.push("ООО «" + (p.name || "") + "»");
+        L.push(kv("Юридический адрес:", p.addr));
+        L.push([kv("ИНН", p.inn), kv("КПП", p.kpp)].filter(Boolean).join(", ") || null);
+        L.push(kv("ОГРН", p.ogrn));
+        if (p.bank || p.bik || p.account || p.corr) L.push("Банковские реквизиты:");
+        L.push(p.bank || null);
+        L.push(kv("БИК", p.bik));
+        L.push(kv("р/с", p.account));
+        L.push(kv("к/с", p.corr));
+      } else if (p.kind === "ip") {
+        L.push("Индивидуальный предприниматель");
+        L.push(p.name || null);
+        L.push(kv("ИНН:", p.inn));
+        L.push(kv("ОГРНИП:", p.ogrn));
+        L.push(kv("Адрес:", p.addr));
+        L.push(kv("р/с:", p.account));
+        L.push(kv("в:", p.bank));
+        L.push(kv("БИК:", p.bik));
+        L.push(kv("к/с:", p.corr));
+      } else {
+        L.push(kv("ФИО:", p.name));
+        L.push(kv("Адрес:", p.addr));
+        L.push(kv("Паспорт:", p.passport));
+      }
+      L.push(kv("e-mail:", p.email));
+      L.push(kv("тел.:", p.phone));
+      return L.filter(Boolean);
+    };
+    // Подпись: должность (может быть в две строки для УК) + линия с фамилией
+    const signLines = (p, role) => {
+      const L = [];
+      if (role === "exec") {
+        L.push(p.kind === "ooo" ? (p.signerTitle || "Генеральный директор") : "Индивидуальный предприниматель");
+      } else if (p.kind === "ooo") {
+        L.push(p.signerTitle || "Генеральный директор");
+        if (p.viaMc && p.mcName) L.push("УК ООО «" + p.mcName + "»");
+      } else if (p.kind === "ip") {
+        L.push("Индивидуальный предприниматель");
+      }
+      L.push("___________________________ /" + (p.signerShort || (p.kind === "person" ? shortFio(p.name) : "____________")) + "/");
+      L.push("(м.п.)");
+      return L;
+    };
+    // «Иванов Иван Иванович» → «И.И. Иванов»
+    const shortFio = (fio) => {
+      const p = String(fio || "").trim().split(/\s+/);
+      if (p.length < 2) return p[0] || "____________";
+      return p.slice(1).map((x) => x[0].toUpperCase() + ".").join("") + " " + p[0];
+    };
+
+    /* =========================================================================
+       ДОГОВОР — 2/3: статьи договора и приложения (единое дерево блоков)
+
+       Блоки:
+         {k:'h'}   заголовок по центру      {k:'at'}  заголовок статьи
+         {k:'p'}   абзац (cls: dc/dr/db/di) {k:'sp'}  пустая строка
+         {k:'br'}  разрыв страницы          {k:'tbl'} таблица без рамок
+       Ячейка таблицы: строка или {b:[блоки]}.
+       Нумерация пунктов и перекрёстные ссылки (п. 6.1, ст. 4, п.п. 1.4, 2.4, 4.7)
+       соответствуют порядку пунктов в шаблонах бюро — порядок менять нельзя,
+       иначе ссылки «поедут».
+       ========================================================================= */
+
+    const ART = (t, pts) => ({ t, p: pts.filter(Boolean) });
+
+    function docArticles(m) {
+      const f = m.f, isA = m.disc === "arch", isI = !isA;
+      const total = mon0(m.total) + " (" + numWords(m.total) + ") рублей" +
+        (m.nds && m.total > 0 ? ", в том числе НДС " + NDS_RATE + "% в размере " + mon2(ndsOf(m.total)) +
+          " рублей (на основании п. 8 ст. 164 НК РФ)" : "");
+      const nda = f.nda
+        ? " не ранее, чем через " + f.ndaYears + " " + plural(f.ndaYears, ["год", "года", "лет"]) +
+          " после получения результатов работ Заказчиком"
+        : "";
+      const term = f.termMode === "dates"
+        ? "с " + (dmyDot(f.dateFrom) || "__________") + " по " + (dmyDot(f.dateTo) || "__________")
+        : daysNom(m.days);
+
+      const A = [];
+
+      A.push(ART("Предмет договора", [
+        "Заказчик поручает, а Исполнитель обязуется в установленный срок выполнить Проект.",
+        "Заказчик обязуется принять и оплатить результаты работ в порядке, предусмотренным настоящим договором и приложениями к нему.",
+        "Состав Проекта, требования и условия Заказчика в отношении содержания Проекта, а также порядок и этапы выполнения работ указаны в Составе работ.",
+        "Состав и порядок выполнения работ может быть изменен по соглашению Сторон.",
+        "Услуги авторского надзора за ходом " + (isA ? "строительства" : "ремонта") +
+          ", услуги комплектации Объекта, управления ремонтом, а также иные услуги – не входят в предмет настоящего договора и могут быть оказаны на основании отдельных самостоятельных сделок.",
+      ]));
+
+      const counter = "Обязательства Исполнителя по выполнению работ являются встречными по отношению к обязательствам Заказчика по оплате работ. Исполнитель вправе не приступать к работе по этапу, либо приостановить работы в случае нарушения Заказчиком порядка оплаты работ. Подобное следует рассматривать как задержку выполнения работ по вине Заказчика.";
+      const cashless = "Оплата по Договору производится безналичными денежными средствами перечислением на расчетный счет Исполнителя." + TAX_SENTENCE[f.exec.tax];
+
+      if (isA) {
+        A.push(ART("Стоимость работ и порядок оплаты", [
+          "Общая стоимость работ рассчитывается по формуле: Площадь Объекта  х  Ставка = Общая стоимость работ, и составляет " + total + ".",
+          "При расчете общей стоимости работ Стороны последовательно применяют сначала Предварительную площадь Объекта, затем Проектную площадь Объекта.",
+          "Предварительная площадь Объекта используется для определения общей стоимости работ на момент заключения настоящего договора. Общая стоимость работ, рассчитанная на основе Предварительной площади Объекта, а также цены отдельных этапов работ также указываются в Составе работ.",
+          "Стоимость работ изменяется при увеличении или уменьшении сложности проекта/объекта проектирования, изменения вида назначения объекта, существенного изменения (более 30%) площади от той, что прописывается в договоре или приложении к договору.",
+          "После выполнения и согласования планировочного решения Объекта становится известна окончательная Проектная площадь Объекта. Если Проектная площадь объекта превышает Предварительную площадь Объекта, общая стоимость работ подлежит перерасчету с учетом Проектной площади Объекта. Изменение стоимости работ фиксируется путем заключения дополнительного соглашения или уведомлением Заказчика по электронной почте.",
+          "Общая стоимость работ является твердой и может быть изменена лишь на основаниях и в порядке, предусмотренных настоящим договором (п.п. 1.4, 2.4, 4.7).",
+          "Порядок оплаты работ указан в Составе работ.",
+          counter,
+          cashless,
+        ]));
+      } else {
+        A.push(ART("Стоимость работ и порядок оплаты", [
+          (f.formula
+            ? "Общая стоимость работ рассчитывается по формуле: «Ставка за 1 м2 х Площадь Объекта» и составляет " + total + "."
+            : "Общая стоимость работ составляет " + total + ".") +
+            " При этом учитывается площадь Объекта по общему внутреннему контуру, с учетом площадей внутренних стен и перегородок.",
+          "Общая стоимость работ может быть изменена в случае согласованного изменения состава работ (например - появление новых работ по инициативе Заказчика), либо в случае установления иного значения площади Объекта после выполнения Исполнителем замеров (в случае существенного изменения более 30%).",
+          "Порядок оплаты работ указан в Составе работ.",
+          counter,
+          cashless,
+        ]));
+      }
+
+      A.push(ART("Сроки выполнения работ", [
+        "Сроки выполнения работ составляют " + term + ". Сроки выполнения работ каждого этапа работ указаны в Составе работ.",
+        (isA ? "Исчисление срока окончания этапа работ" : "Исчисление окончания срока этапа работ") +
+          " прекращается в день передачи Заказчику результатов работ по соответствующему этапу в порядке, предусмотренном п. 6.1 настоящего договора. Периоды внесения поправок по инициативе Заказчика (ст. 4 настоящего договора), а также периоды согласования результатов работ (ст. 6 настоящего договора) – не входят в сроки работ по этапам.",
+        "В случае задержки выполнения работ, допущенной по вине Заказчика, срок выполнения работ соразмерно увеличивается. В качестве задержки выполнения работ по вине Заказчика следует считать: нарушения обязательств по оплате работ; нарушения обязательств по предоставлению " +
+          (isA ? "исходной документации" : "необходимой исходной информации, предусмотренной настоящим договором") +
+          "; непредоставление доступа на Объект; нарушение сроков согласования и/или приема-передачи работ, а также нарушения Заказчиком иных обязательств, предусмотренных настоящим " + (isA ? "Договором" : "договором") + ".",
+        "Если по вине Заказчика происходит значительная задержка работ (на срок от 14 дней и более) – Исполнитель вправе законсервировать (приостановить) работы и далее по своему усмотрению назначить дату продолжения работ с учетом совмещения данной работы с работой над другими проектами, либо отказаться от исполнения договора в одностороннем порядке. Если период вынужденной приостановки работ составляет 6 (шесть) месяцев и более, Исполнитель вправе пересмотреть стоимость дальнейших работ с учетом текущего изменения расценок.",
+        "Исполнитель вправе выполнить работы досрочно. В этом случае Заказчик обязуется досрочно принять результаты работ.",
+        "Стороны вправе досрочно расторгнуть настоящий договор по обоюдному соглашению. Такое соглашение может быть зафиксировано письменно (в форме Соглашения о расторжении договора), либо путем переписки Сторон по электронной почте или в мессенджерах.",
+        "Заказчик вправе отказаться от исполнения настоящего договора путем уведомления Исполнителя посредством электронной почты, мессенджеров или иными способами. Настоящий договор следует считать расторгнутым со дня получения Исполнителем уведомления об отказе от исполнения договора. Заказчик обязуется произвести окончательный взаиморасчет по работам, фактически выполненным по дату расторжения договора, на основании акта бросовых работ" +
+          (isA ? ", в течение" : " в течение") + " 3 (трех) дней с даты расторжения договора или предъявления Исполнителем соответствующего требования.",
+      ]));
+
+      A.push(ART("Порядок внесения поправок в Проект", [
+        "Стороны договорились о возможности внесения поправок в Проект по инициативе Заказчика.",
+        "Внесение поправок – это услуга, состав и пределы которой установлены настоящим договором и " +
+          (isA ? "Составом работ" : "Техническим заданием") + ". Периоды и сроки внесения поправок не входят в сроки выполнения этапов работ.",
+        {
+          t: "Все возможные поправки делятся на две категории: значительные и незначительные.",
+          sub: [
+            "Значительные поправки – это такие, которые приводят к изменению или дополнению исходных требований (Технического задания), или уже согласованных материалов (результатов работ по предыдущим этапам).",
+            "Незначительные поправки и дополнения – это такие, которые не противоречат исходному Техническому заданию или принятым результатам работ по предыдущим этапам и вносятся с целью уточнения и улучшения разрабатываемого проекта.",
+          ],
+        },
+        "Факт внесения поправок (а равно запрос на их внесение) – не свидетельствует о недостатках результатов работ. Цель внесения поправок – удовлетворение эстетических требований Заказчика. В случае же выявления недостатков в результатах работ" +
+          (isA ? ", Заказчик" : " Заказчик") +
+          " обязуется указать на конкретный состав, характер и мотивировку выявленных недостатков. При этом недостатками Проекта могут быть признаны нарушения требований, содержащихся в Техническом задании" +
+          (isI ? " (при его наличии)" : "") +
+          ". При указании недостатков Заказчик обязан указать на конкретные нарушения конкретных требований Технического задания. В противном случае заявление о наличии недостатков является немотивированным.",
+        "Заказчик вправе запрашивать внесение поправок в Проект во время согласования результатов этапов работ. Запросы поправок производятся посредством электронной почты, мессенджеров или в рамках встреч Сторон. При указании необходимых поправок Заказчик гарантирует использование четких, понятных и точных формулировок. Исполнитель не принимает в работу поправки, которые сформулированы размыто и непонятно (например, «сделайте красивее», «поиграйте со стилями», «добавьте эмоций» и т.д.). Заказчик вправе запрашивать внесение блоков правок. Один блок поправок включает все поправки, запрошенные Заказчиком в течение одного рабочего дня.",
+        "Незначительные поправки (блоки поправок) выполняются безвозмездно в количестве, установленном Составом работ.",
+        "Значительные поправки выполняются на условиях дополнительной оплаты. Условия (сроки, " + (isA ? "стоимость" : "цена") +
+          ") выполнения таких услуг согласуются Сторонами дополнительно – письменно, либо посредством электронной почты или мессенджеров.",
+        "Учитывая, что Сторонам заранее неизвестен состав и содержание необходимых поправок, срок внесения поправок также заранее не определен. Исполнитель обязуется вносить поправки в минимальные разумные сроки.",
+        isI && "Исполнитель не производит чертежи сложных декоративных элементов, любые разделы инженерных проектов, не занимается подготовкой документов, необходимых для согласования перепланировки.",
+        isI && "Окончательный внешний вид и свойства мебели и конструктивных элементов (лестницы, камины и пр.) – определяются поставщиками или производителями соответствующих позиций. Сведения Проекта в отношении таких элементов носят эскизный и рекомендательно-справочный характер.",
+        isI && "Ведомости (спецификации) являются концептуальными и не содержат указаний на артикулы конкретных товаров и источники их приобретения.",
+      ]));
+
+      A.push(isA
+        ? ART("Особенности производства 3D-визуализаций", [
+            "Если подобное предусмотрено Техническим заданием, Исполнитель обязуется выполнить наглядные 3D-визуализации с целью наилучшей демонстрации архитектурной концепции.",
+            "Любые элементы 3D-визуализации не являются элементами рабочей документации и не могут служить основой для производства строительных работ. 3D-визуализации – это элементы эскизного проекта со всеми сопутствующими искажениями перспективы, цветовых оттенков и геометрических форм.",
+            "При производстве трехмерных сцен и 3D-визуализаций Исполнитель использует собирательные образы декоративных и архитектурных элементов и прочих конструкций. Внешний вид таких элементов на 3D-визуализации может отличаться от внешнего вида настоящих соответствующих элементов, которые в дальнейшем будут использованы при строительстве.",
+            "Фактуры, цвета отдельных объектов, деталей здания и иных архитектурных элементов, фасадов и интерьеров на 3D-визуализациях – являются приблизительными ввиду невозможности их точного отображения на различных носителях (мониторах, распечатках).",
+          ])
+        : ART("Особенности производства коллажей и 3D-визуализаций", [
+            "Если подобное предусмотрено Техническим заданием, Исполнитель в рамках отдельных этапов работ обязуется выполнить наглядные коллажи и/или 3D-визуализации отдельных помещений Объекта с целью наилучшей демонстрации концепции дизайна.",
+            "Коллажи и 3D-визуализации не являются элементами рабочей документации проекта, и не могут служить основой для производства ремонтно-отделочных работ. Коллажи и 3D-визуализации – это элементы художественного проекта со всеми сопутствующими искажениями перспективы, цветовых оттенков и геометрических форм.",
+            "При производстве коллажей и 3D-визуализаций Исполнитель использует собирательные образы мебели, декора, отделочных материалов и прочих конструкций и элементов Проекта. Внешний вид таких элементов может отличаться от внешнего вида настоящих соответствующих элементов, которые в дальнейшем могут быть приобретены Заказчиком при воплощении Проекта. 3D-визуализации и внешний вид реализованного интерьера визуально не аутентичны.",
+            "На коллажах и 3D-визуализациях могут не отображаться розетки, выключатели, иные электроточки, а также любые элементы инженерных систем и коммуникаций. Схемы размещения таких элементов выполняются на чертежах.",
+            "Коллажи и 3D-визуализации не производятся в отношении технических и подсобных помещений (постирочные, бойлерные, гардеробные, кладовые и т.п.), если в Техническом задании не указано иное.",
+            "Исполнитель вправе выполнять коллажи и 3D-визуализации помещений Объекта последовательно, при этом согласовывая их с Заказчиком. В этом случае отправка и согласование коллажей или 3D-визуализаций каждого помещения выполняется в порядке, предусмотренном для отправки и согласования результатов работ по этапам (ст. 6 настоящего договора). Исполнитель вправе не приступать к коллажам или 3D-визуализациям каждого последующего помещения до получения согласования коллажей или 3D-визуализаций предыдущего помещения.",
+          ]));
+
+      A.push(ART("Порядок приема-передачи результатов работ", [
+        "По завершении очередного этапа работ (или части работ по этапу), предусмотренного Составом работ, Исполнитель направляет Заказчику результаты работ посредством электронной почты или мессенджеров. Результаты работ передаются в виде электронно-цифровых файлов в формате .PDF, либо .JPG или в иных форматах растровой графики.",
+        "Заказчик производит проверку результатов работ в срок не более 3 (трех) рабочих дней, по результатам которой вправе либо принять результаты работ, либо требовать внесения поправок (ст. 4), либо заявить мотивированный отказ от приемки результатов работ.",
+        "Факт приемки Заказчиком результатов этапа работ в равной степени подтверждается либо внесением авансового платежа" +
+          (isA ? " за выполнение работ" : "") +
+          ", либо производством оплаты выполненных работ, либо подписанием акта приема-передачи результатов этапа работ, либо подписанием результатов работ в распечатанном виде, либо уведомлением, направленным посредством электронной почты или мессенджеров. Учитывая преимущественно удаленный формат работы Сторон, акт приема-передачи не является единственным возможным способом доказывания факта приемки выполненных работ.",
+        "Поправки вносятся на условиях и в порядке, указанных в статье 4 настоящего договора.",
+        "Если в течение указанного в п. 6.2 срока приемки Заказчик не заявил мотивированный отказ от приемки результатов работ, или не запросил внесение правок, результаты работ следует считать принятыми в полном объеме.",
+        "Заказчик вправе назначить своего представителя для согласования и приемки результатов работ. Данные " +
+          (isA ? "Представителя" : "представителя") +
+          " указаны в Составе работ. Представитель вправе от имени Заказчика совершать любые действия в рамках исполнения настоящей сделки, в том числе: принимать результаты этапов работ, запрашивать внесение поправок, заявлять отказ от приемки результатов работ, контролировать процедуру разработки Проекта и совершать иные действия. Настоящий пункт является основанием для применения правил ГК РФ о доверенности на " +
+          (isA ? "Представителя" : "представителя") + ", согласно п. 4 ст. 185 ГК РФ.",
+        "Учитывая, что результаты работ по каждому этапу являются основой для выполнения работ последующих этапов, приемка Заказчиком результатов работ по любому этапу является подтверждением факта приемки результатов работ по всем предыдущим этапам работ.",
+        "Исходные файлы, и прочие наработки Исполнителя передаче Заказчику не подлежат.",
+      ]));
+
+      A.push(ART("Исключительное право в отношении результатов работ", [
+        "Разработанный Проект в соответствии со ст. 1259 ГК РФ является охраняемым объектом авторского права (" +
+          (isA ? "произведение архитектуры" : "произведение") + ").",
+        "Исполнителю принадлежит исключительное право, а также иные интеллектуальные права в отношении результатов работ по настоящему договору (ст. 1229, 1255, 1270 ГК РФ).",
+        isA
+          ? "Заказчик приобретает право на практическую реализацию Проекта (п. 10 ч. 2 ст. 1270 ГК РФ). Плата за передачу права согласована Сторонами, включена в общую цену работ и составляет 0,1% от общей цены."
+          : "Заказчик приобретает право на практическую реализацию Проекта (п. 10 ч. 2 ст. 1270 ГК РФ). Плата за передачу права согласована Сторонами и включена в общую стоимость работ.",
+        "Все эскизы, наброски, предварительные материалы и прочие наработки Исполнителя по настоящему договору являются и остаются его интеллектуальной собственностью, передаче Заказчику не подлежат.",
+        isA
+          ? "Исполнитель вправе использовать результаты работ (планы, схемы, 3D-визуализации) при формировании собственного портфолио, а также публиковать эти материалы на своем сайте, тематических интернет- и печатных изданиях, в иных источниках" + nda + ". При этом Исполнитель гарантирует конфиденциальность любых сведений о Заказчике."
+          : "Исполнитель вправе использовать результаты работ (планы, схемы, 3D-визуализации) при формировании собственного портфолио, а также публиковать эти материалы на своем сайте, тематических интернет- и печатных изданиях, в иных источниках при условии соблюдения режима конфиденциальности в отношении адреса Объекта, а также любых сведений о Заказчике" + nda + ".",
+        (isA
+          ? "Исполнитель имеет право на производство фото- и видеосъемки Объекта: как во время выполнения строительно-монтажных работ, так и по их завершении."
+          : "Исполнитель имеет право на производство фото- и видеосъемки интерьера на Объекте: как во время выполнения ремонтно-отделочных работ, так и по завершении выполнения ремонтно-отделочных работ на основе выполненного Проекта.") +
+          " Исполнитель вправе использовать результаты такой съемки любыми способами: путем публикации в собственном портфолио, а также на иных ресурсах сети «Интернет»; путем публикации в средствах массовой информации, печатных периодических изданиях, а также в любых иных источниках на усмотрение Исполнителя" + nda +
+          ". Дополнительное согласование производства съемки и использования ее результатов не требуется. Исполнитель обязуется соблюдать режим конфиденциальности в отношении адреса Объекта и любых сведений о Заказчике. Настоящим Заказчик заявляет и подтверждает, что производство Исполнителем фото- и видеосъемки " +
+          (isA ? "на Объекте" : "интерьера на Объекте") +
+          ", а также дальнейшая публикация результатов съемки не приведет и не может привести к нарушению прав и/или законных интересов третьих лиц, в том числе членов семьи Заказчика и иных лиц.",
+      ]));
+
+      A.push(ART("Права и обязанности сторон", [
+        {
+          t: "Исполнитель обязан:",
+          sub: [
+            "Выполнить работу надлежащим образом и передать Заказчику результаты работ в установленные сроки.",
+            "При выполнении работ руководствоваться Составом работ.",
+            "При разработке Проекта использовать только технически-реализуемые проектные решения.",
+            "В случае выявления обстоятельств, исключающих возможность дальнейшей разработки Проекта на основе существующего Технического задания, незамедлительно уведомить об этом Заказчика.",
+            "По запросу Заказчика информировать его о степени готовности Проекта, а также знакомить с промежуточными результатами работ.",
+            "Обеспечить Заказчику возможность связи (посредством электронной почты или телефона) по любым вопросам, связанным с исполнением работ по настоящему договору, в рабочее время: по будням, с 10:00 до 19:00. В иное время Исполнитель вправе не выходить на связь с Заказчиком.",
+          ],
+        },
+        {
+          t: "Исполнитель вправе:",
+          sub: [
+            "Привлекать к выполнению работы третьих лиц. При этом Исполнитель несет полную ответственность перед Заказчиком за действия/бездействие привлеченных им третьих лиц.",
+            "Требовать оплату работ на условиях, установленных настоящим договором и приложениями к нему.",
+          ],
+        },
+        {
+          t: "Заказчик обязан:",
+          sub: [
+            "Надлежащим образом принимать и оплачивать работу на условиях и в порядке установленных настоящим договором и приложениями к нему.",
+            "Передать Исполнителю до начала работ исходные материалы, состав которых указан в Составе работ.",
+            "Обеспечивать Исполнителю доступ на Объект для осуществления работ, предусмотренных настоящим договором.",
+            "Обеспечивать принятие решений в ходе обсуждения или корректировки наработок Исполнителя сроки, предусмотренные настоящим договором. Предоставлять Исполнителю дополнительную запрашиваемую информацию касательно Объекта.",
+          ],
+        },
+        {
+          t: "Заказчик вправе:",
+          sub: [
+            "Требовать от Исполнителя надлежащего исполнения обязательств и соблюдения требований в отношении состава и сроков выполнения работ.",
+            "Запрашивать внесение поправок в Проект в объеме и количествах, установленных настоящим договором и приложениями к нему.",
+            "Отказаться от приемки результатов работ в случае выявления мотивированных недостатков.",
+            "Привлекать квалифицированных третьих лиц с целью проверки качества результатов работ Исполнителя.",
+          ],
+        },
+      ]));
+
+      A.push(ART("Ответственность сторон", [
+        "Стороны несут ответственность за нарушение своих обязательств по настоящему договору в соответствии с действующим законодательством Российской Федерации.",
+        "В случае просрочки выполнения работ Исполнитель по письменному требованию Заказчика выплачивает неустойку в размере 0,1% от стоимости работ по просроченному этапу за каждый день просрочки, но не более 10% в целом, если законом не установлены иные ставка и пределы неустойки.",
+        "В случае просрочки оплаты работ Заказчик выплачивает по письменному требованию Исполнителя неустойку в размере 0,1% от суммы просроченного платежа за каждый день просрочки, но не более 10% в целом.",
+        isA && "Ответственность Исполнителя ограничена суммой вознаграждения, фактически полученного в счет оплаты выполненных работ.",
+        isA && "Заказчик самостоятельного производит согласование дальнейшего строительства, а также получение разрешительной документации в соответствующих учреждениях, государственных и муниципальных органах и учреждениях.",
+        isA && "Исполнитель не несет ответственности за ошибки бригады строителей, смежников и иных третьих лиц, допущенные при производстве работ на основе разработанного Проекта.",
+        isI && "Разрабатываемый Проект является авторским проектом художественного оформления (декорирования) интерьера. Цель создания Проекта – сформировать концепцию художественного оформления интерьера. Проект содержит сведения о внешнем виде будущего интерьера, его потребительских свойствах и качествах. Проект является результатом творческой работы Исполнителя (его работников), которая регламентируется нормами эстетики и удобства последующего использования. Исполнитель гарантирует способность технической реализации всех использованных проектных решений.",
+        isI && "Разрабатываемый Проект выполняется с целью дальнейшего производства на его основе ремонтно-отделочных работ в пределах периметра Объекта, а также работ по художественному оформлению, декорированию и наполнению интерьера. Проект выполняется не для строительства (п. 13 ст. 1 ГрК РФ), не для реконструкции (п. 14 ст. 1 ГрК РФ), а также не для капитального ремонта (п. 14.2 ст. 1 ГрК РФ). Также дизайн-проект не заявлен в качестве проектной документации в постановлении Правительства РФ от 16.02.2008 №87 «О составе разделов проектной документации и требованиях к их содержанию». В связи с этим, а также в соответствии с п. 2 ст. 48 ГрК РФ, разрабатываемый Проект не является архитектурно-строительной проектной документацией в понимании ст. 48 ГрК РФ.",
+        isI && "Стороны согласовали и подтверждают, что в целях полной реализации поставленных Заказчиком задач, Исполнитель вправе отступать от установленных нормативов и правил в сфере разработки планировочных решений. Подобные отступления и нарушения нормативов не могут впоследствии рассматриваться в качестве недостатков Проекта. Заказчик подтверждает, что последствия таких нарушений ему известны.",
+        isI && "Разрабатываемый Проект не является проектом перепланировки и/или переустройства. Проект является техническим заданием для последующей разработки третьими лицами проекта перепланировки или переустройства, необходимого для согласования перепланировки или переустройства и получения разрешительной документации на производство работ в установленном законом порядке.",
+        isI && "Заказчик самостоятельно согласует любые существенные изменения Объекта (перепланировка (п. 2 ст 25 ЖК РФ), переустройство (п. 1 ст 25 ЖК РФ) в соответствующих учреждениях, гос. органах и инстанциях (БТИ, жилищные инспекции, управляющие компании и т.д.). Услуга по производству Исполнителем всех необходимых согласований и получения разрешений на производство ремонтных работ не входит в предмет настоящего договора.",
+        isI && "Исполнитель не несет ответственности за ошибки бригады отделочников, мебельщиков, смежников и иных третьих лиц, допущенные при производстве ремонтно-отделочных работ.",
+      ]));
+
+      A.push(ART("Разрешение споров", [
+        isA
+          ? "Любые споры и разногласия по настоящему договору Стороны договорились разрешать в претензионном порядке, путем отправки обоснованных и мотивированных претензий, если действующим законом не установлен иной порядок разрешения споров."
+          : "Стороны договорились разрешать любые споры и разногласия по настоящему договору в претензионном порядке, путем отправки обоснованных и мотивированных претензий, если действующим законом не установлен иной порядок разрешения споров.",
+        "Любые письма, уведомления, претензии, направленные Сторонами друг другу посредством Почты России или курьерских служб, следует считать полученными по истечении 10 (десяти) дней со дня отправки, если отсутствует свидетельство об иной дате получения письма адресатом.",
+        "Любые письма, уведомления, претензии, направленные Сторонами друг другу посредством электронной почты или мессенджеров, следует считать полученными адресатом в день отправки.",
+        "Срок ответа на поступившее письмо или претензию – не более 10 (десяти) дней.",
+        "Стороны признают юридическую силу переписки по электронной почте и в мессенджерах. Документы, направленные посредством электронной почты или мессенджеров, имеют юридическую силу. Стороны подтверждают, что любые сведения из переписки по электронной почте и мессенджеров между ними формируют полноценную доказательственную базу при разрешении споров.",
+        "В случае невозможности урегулирования разногласий в претензионном порядке Стороны договорились передать спор на рассмотрение в " + (f.court || "Арбитражный суд Иркутской области") + ".",
+      ]));
+
+      A.push(ART("Прочие условия", [
+        "Настоящий договор составлен в двух экземплярах, имеющих равную юридическую силу, по одному для каждой Стороны.",
+        "Вопросы, неурегулированные настоящим договором, регулируются действующим законодательством Российской Федерации.",
+        "К настоящему договору прилагается Состав работ (Приложение 1), " + (isA ? "который" : "которое") + " является его неотъемлемой частью.",
+        "Ни одна Сторона не вправе уступать свои права по настоящему договору третьим лицам без предварительного письменного согласования такой уступки прав с другой Стороной.",
+      ]));
+
+      return A;
+    }
+
+    /* ── Термины и определения ────────────────────────────────────────────── */
+    const docTerms = (m) => m.disc === "arch" ? [
+      "Проект – комплект архитектурно-проектной документации для строительства или реконструкции объекта индивидуального жилого строительства или иной постройки. Конкретный состав Проекта указан в Составе работ, являющимся неотъемлемой частью настоящего договора (Приложение №1).",
+      "Объект – предмет проектирования: объект индивидуального жилого строительства или иная постройка. Адрес Объекта указан в Составе работ (Приложение №1).",
+      "Техническое задание – исчерпывающий комплекс условий и требований Заказчика в отношении Проекта.",
+      "Исходная документация – документация, на основании которой выполняется Проект. Состав необходимой Исходной документации указан в Составе работ (Приложение №1).",
+      "Предварительная площадь Объекта – ориентировочная площадь Объекта по наружному контуру каркаса Объекта, без учета внутренних стен и перегородок, предварительно согласованная на момент заключения настоящего договора. Указана в Составе работ. Применяется для расчета предварительной общей цены работ.",
+      "Проектная площадь Объекта – окончательная проектная площадь Объекта по наружному контуру каркаса Объекта, без учета внутренних стен и перегородок, которая становится известна по итогам разработки и согласования планировочного решения. Применяется для расчета окончательной общей цены работ. Проектная площадь Объекта может отличаться от предварительной.",
+      "Ставка – стоимость работ за выполнение Проекта в отношении одного квадратного метра Объекта. Является основой для расчета общей стоимости работ.",
+    ] : [
+      "Проект и\\или дизайн-проект – проект художественного оформления интерьера объекта. Проект разрабатывается с целью выполнения на его основе отделочных работ, а также работ по художественному оформлению, декорированию и наполнению интерьера. Конкретный состав работ Проекта указан в Составе работ, являющимся неотъемлемой частью настоящего договора (Приложение №1).",
+      "Объект – помещение, с целью художественного оформления которого выполняется Проект. Адрес Объекта указан в Составе работ (Приложение №1).",
+    ];
+
+    /* ── Приложение №2: налоговые заверения и НДС ─────────────────────────── */
+    const APP2 = [
+      { h: "С учетом вступления в силу с 01.01.2025 изменений налогового законодательства стороны договорились и согласовали настоящее соглашение об условиях применения НДС (в том числе об обязанности выставлять счета-фактуры и применяемой ставки налога)." },
+      { n: "1. В соответствии со ст. 431.2 Гражданского кодекса РФ, Стороны заверяют друг друга об обстоятельствах, имеющих значение для заключения, исполнения и/или прекращения Договора, а именно в том, что:" },
+      { b: "Каждая из сторон является надлежащим образом учреждённым и зарегистрированным юридическим лицом и/или надлежащим образом зарегистрированным предпринимателем, правомочным в соответствии с законодательством РФ на заключение Договора;" },
+      { b: "В отношении Сторон отсутствуют данные о недостоверности сведений, включаемых согласно Федеральному закону от 08.08.2001г. № 129-ФЗ «О государственной регистрации юридических лиц и индивидуальных предпринимателей» в Едином государственном реестре юридических лиц, а также основания для признания представленных Сторонами сведений недостоверными (сведения об адресе юридического лица, учредителе, руководителе), руководители Сторон не включены в реестр дисквалифицированных лиц;" },
+      { b: "В отношении каждой из Сторон отсутствуют события несостоятельности, под которыми понимается:" },
+      { b: "наличие признаков неплатежеспособности и(или) признаков недостаточности имущества, установленных действующим законодательством Российской Федерации о банкротстве, включая Федеральный закон от 26.10.2002г. № 127-ФЗ «О несостоятельности (банкротстве)»;" },
+      { b: "начало или осуществление в судебном или внесудебном порядке в отношении сторон процедуры ликвидации, исключения из Единого государственного реестра юридических лиц, прекращения деятельности, конкурсного производства, введения наблюдения, конкурсного управления, внешнего управления, моратория, приостановки или ограничения прав кредиторов;" },
+      { b: "каждой из сторон были совершены все действия, соблюдены все условия и получены все разрешения и согласия, необходимые для заключения и исполнения Договора;" },
+      { b: "обязательства по Договору будут полностью исполняется непосредственно Сторонами своими силами и средствами." },
+      { b: "все операции по продаже товара/оказанию услуг/работ Заказчику будут полностью отражены в первичной документации Исполнителя, в обязательной бухгалтерской, налоговой, статистической и любой иной отчетности;" },
+      { b: "передача стороной всех или части своих обязательств по Договору третьим лицам не допускается, если иное прямо не предусмотрено законом или Договором;" },
+      { b: "каждая из сторон соблюдает требования законодательства в части ведения налогового и бухгалтерского учёта, полноты, точности и достоверности отражения операций в учёте, исполнения налоговых обязательств по начислению и уплате налогов и сборов, а также требования трудового законодательства и законодательства о социальном обеспечении, в том числе в части полноты отражения в учете начислений и выплат работникам, полноты уплачиваемых страховых взносов;" },
+      { b: "основной целью совершения сделки (совершения операций) по Договору не являются неуплата (неполная уплата) и (или) зачет (возврат) суммы налога в понимании положений статьи 54.1 НК РФ;" },
+      { n: "2. Стороны заверяют и гарантируют, что на момент подписания настоящего соглашения в последующих налоговых периодах, в течение которых совершаются операции по Договору, что:" },
+      { b: "Исполнитель, применяющий упрощенную систему налогообложения, обязуется известить Заказчика о предстоящем изменении ставки НДС, не позднее 3 (Трех) рабочих дней с момента, когда контрагент узнал о предстоящей смене ставки, путем направления информационного письма в адрес Заказчика, а также выставлять и регистрировать счета-фактуры, вести книгу продаж и книгу покупок, сдавать декларации по НДС в установленные законодательством сроки. Стороны предоставят достоверные, полностью соответствующие законодательству РФ первичные документы, которыми оформляется исполнение обязательств по Договору (включая, но не ограничиваясь, универсальный передаточный документ и т.д.);" },
+      { b: "Исполнитель обязан предоставлять первичные учетные (бухгалтерские) документы в соответствии с действующим на момент предоставления таких первичных учетных (бухгалтерских) документов режимом налогообложения. В случае если Исполнитель предоставил первичные учетные (бухгалтерские) документы Заказчику не в соответствии с действующим на момент такого предоставления режимом налогообложения или не предоставил скорректированные по указанному основанию первичные учетные (бухгалтерские) документы до окончания отчетного периода, и/или в случае непредоставления всех первичных учетных (бухгалтерских) документов, предусмотренных Договором и/или действующим законодательством, Заказчик вправе потребовать от Исполнителя уплаты штрафа в размере 200 (Двести) рублей за каждый день просрочки предоставления по каждому первичному учетному (бухгалтерскому) документу." },
+      { b: "Ни одна из сторон не осуществляет и не будет осуществлять уменьшение налоговой базы в результате искажения сведений о фактах хозяйственной жизни (совокупности таких фактов), об объектах налогообложения, подлежащих отражению в налоговом и (или) бухгалтерском учете либо налоговой отчетности;" },
+      { b: "Все операции, совершенные в рамках Договора, будут полностью отражены в первичной документации, в обязательной бухгалтерской, налоговой, статистической и любой иной отчетности;" },
+      { b: "Стороны совершат необходимые действия по подтверждению операций по исполнению Договора, в том числе, предоставят по первому требованию стороны или органов государственного контроля или суда надлежащим образом заверенные копии документов, относящихся к указанным операциям в срок, не превышающий 5 (Пять) рабочих дней с момента получения соответствующего запроса, государственного органа или суда, если иной срок не указан в запросе;" },
+      { b: "По операциям с участием Сторон не имеется и не будет иметься признаков несформированного источника по цепочке поставщиков товаров, субподрядчиков (работ, услуг) для принятия к вычету сумм НДС (далее – «Несформированный источник для вычета по НДС»)." },
+      { b: "В случае, если Заказчик инициирует проведение сверки взаиморасчетов по Договору, Стороны соглашаются, что такая сверка осуществляется не реже 1 (Одного) раза в квартал, если иное не будет прямо согласовано Сторонами в Договоре." },
+      { n: "3. Возмещение убытков и/или имущественных потерь, как это определено в ст. 406.1 ГК РФ, производится на основании акта или решения налогового органа, вынесенных по результатам налоговой проверки." },
+      { b: "Исполнитель, допустивший нарушение указанных выше гарантий и обязательств возмещает Заказчику полностью все подтвержденные и доказанные потери, определенные актом государственного органа, в частности, решением налогового органа. Исполнитель обязуется возместить подтвержденные и доказанные потери и/или убытки Заказчику в течение 10 (Десяти) рабочих дней с даты получения соответствующего требования, подтвержденного соответствующими документами." },
+      { b: "Заказчик вправе удовлетворить требования о возмещении имущественных потерь и/или убытков из денежных средств, причитающихся выплате Исполнителю по любым основаниям, в порядке зачета встречных денежных требований, направив соответствующее заявление о зачете." },
+      { n: "4. Поворот возмещения убытков и имущественных потерь:" },
+      { b: "Сумма уплаченная в счет возмещения имущественных потерь/убытков подлежит возврату в случаях:" },
+      { b: "Отмены или признания соответствующего решения налогового органа недействительным полностью или в соответствующей части в установленном законом порядке;" },
+      { b: "Устранения признаков Несформированного источника для вычета по НДС, если ранее Сторона добровольно отказалась от применения вычета по НДС по операциям, что должно быть подтверждено соответствующим информационным письмом территориального налогового органа." },
+      { b: "Сторона возвращает денежные средства в течение 10 (Десяти) рабочих дней с даты получения уведомления с приложенными копиями документов, подтверждающих обстоятельства имущественных потерь." },
+      { n: "5. Особые условия:" },
+      { b: "Стороны признают, что условия настоящего Дополнительного соглашения направлены на обеспечение имущественных интересов Сторон вне зависимости от действительности, исполнимости, заключенности Договора. В связи с этим Стороны рассматривают условия настоящего Дополнительного соглашения в качестве самостоятельного, автономного соглашения, не зависящего от основного обязательства по Договору." },
+      { b: "Настоящее Дополнительное соглашение вступает в силу с момента подписания. Условия Дополнительного соглашения действуют в течение всего срока действия Договора." },
+      { b: "Во всем остальном, что не предусмотрено настоящим Дополнительным соглашением, Стороны руководствуются условиями Договора и нормами действующего законодательства." },
+    ];
+
+    /* ── Дерево всего документа ───────────────────────────────────────────── */
+    function docTree(m) {
+      const f = m.f, D = m.d, B = [];
+      const P = (t, cls) => B.push({ k: "p", t, cls });
+      const num = f.num || "____";
+      const dateFull = dmy(f.date) || "«___» ____________ " + yearOf(f.date);
+
+      /* ---------- ДОГОВОР ---------- */
+      B.push({ k: "h", t: "Договор №" + num });
+      B.push({ k: "h", t: D.title });
+      if (f.subtitle) B.push({ k: "h", t: "(" + f.subtitle + ")" });
+      B.push({
+        k: "tbl", widths: [50, 50], tight: true,
+        rows: [[{ b: [{ k: "p", t: f.city || "г. Иркутск" }] }, { b: [{ k: "p", t: dateFull + " г.", cls: "dr" }] }]],
+      });
+      B.push({ k: "sp" });
+      P(partySentence(f.client, "client"));
+      P(partySentence(f.exec, "exec"));
+      B.push({ k: "p", t: "Термины и определения:", cls: "db" });
+      docTerms(m).forEach((t) => P(t));
+
+      docArticles(m).forEach((a, ai) => {
+        B.push({ k: "at", t: (ai + 1) + ". " + a.t });
+        a.p.forEach((pt, pi) => {
+          const nn = (ai + 1) + "." + (pi + 1) + ".";
+          if (typeof pt === "string") P(nn + " " + pt);
+          else {
+            P(nn + " " + pt.t);
+            pt.sub.forEach((s, si) => P(nn + (si + 1) + ". " + s, "di"));
+          }
+        });
+      });
+
+      B.push({ k: "sp" });
+      B.push({ k: "p", t: "Реквизиты и подписи Сторон:", cls: "db" });
+      const reqCell = (title, lines, sign) => ({
+        b: [{ k: "p", t: title, cls: "db" }]
+          .concat(lines.map((l) => ({ k: "p", t: l })))
+          .concat([{ k: "sp" }])
+          .concat(sign.map((l) => ({ k: "p", t: l }))),
+      });
+      B.push({
+        k: "tbl", widths: [50, 50], keep: true,
+        rows: [[
+          reqCell("Исполнитель:", execReqLines(f.exec), signLines(f.exec, "exec")),
+          reqCell("Заказчик:", clientReqLines(f.client), signLines(f.client, "client")),
+        ]],
+      });
+
+      /* ---------- ПРИЛОЖЕНИЕ №1: СОСТАВ РАБОТ ---------- */
+      B.push({ k: "br" });
+      const dateQuoted = f.date
+        ? "«" + Number(String(f.date).split("-")[2]) + "» " + MONTHS_GEN[Number(String(f.date).split("-")[1]) - 1] + " " + yearOf(f.date) + " года"
+        : "«___» _________ 202__ г.";
+      B.push({ k: "p", t: "Приложение №1 к Договору №" + num + " от " + dateQuoted, cls: "dc db" });
+      B.push({ k: "p", t: D.appTitle, cls: "dc" });
+      B.push({ k: "p", t: "(далее – «Договор»)", cls: "dc" });
+      B.push({ k: "sp" });
+      B.push({ k: "at", t: "Состав работ" });
+
+      const info = [];
+      const row = (label, cellBlocks) => info.push([{ b: [{ k: "p", t: label }] }, { b: cellBlocks }]);
+      row(D.addrLabel, [{ k: "p", t: f.objAddr || "—" }].concat(
+        f.objCad ? [{ k: "p", t: "Кадастровый номер: " + f.objCad }] : []));
+      row(D.areaLabel, [{ k: "p", t: m.area > 0 ? nsp(m.area) + " м2" : "—" }]);
+      if (m.rate > 0) row("Ставка (цена за 1 м2):", [{ k: "p", t: mon0(m.rate) + " рублей" }]);
+      row(D.totalLabel, [{ k: "p", t: mon0(m.total) + " рублей" + (m.nds && m.total > 0 ? ", в том числе НДС " + NDS_RATE + "% в размере " + mon2(ndsOf(m.total)) + " рублей" : "") }]);
+      row("Исходные данные:", m.sources.length
+        ? m.sources.map((s) => ({ k: "p", t: "● " + s }))
+        : [{ k: "p", t: "не требуется" }]);
+      if (f.exec.email) row("E-mail Исполнителя:", [{ k: "p", t: f.exec.email }]);
+      if (f.client.email) row("E-mail Заказчика:", [{ k: "p", t: f.client.email }]);
+      if (f.repName || f.repEmail || f.repPhone) {
+        row("Реквизиты Представителя Заказчика (при наличии):", [
+          f.repName ? { k: "p", t: "● ФИО: " + f.repName } : null,
+          f.repEmail ? { k: "p", t: "● E-mail: " + f.repEmail } : null,
+          f.repPhone ? { k: "p", t: "● Тел.: " + f.repPhone } : null,
+        ].filter(Boolean));
+      }
+      B.push({ k: "tbl", widths: [34, 66], rows: info });
+
+      if (m.objDesc.length) {
+        B.push({ k: "sp" });
+        m.objDesc.forEach((t) => P(t));
+      }
+
+      B.push({ k: "at", t: "Этапы выполнения работ:" });
+      m.stages.forEach((s, i) => {
+        const n = i + 1;
+        const first = i === 0;
+        const adv = s.advance;
+        const rest = 100 - adv;
+        const whenAdv = first ? "заключения договора" : "приема-передачи результатов предыдущего этапа работ";
+        const pay = [];
+        if (adv > 0 && adv < 100) {
+          pay.push("● Аванс в размере " + adv + "% от цены работ по этапу, что составляет " +
+            cash(s.price * adv / 100, m.nds) + " – " + daysIn(f.payDays) + " с даты " + whenAdv + ".");
+          pay.push("● Оплата в размере " + rest + "% от цены работ по этапу, что составляет " +
+            cash(s.price * rest / 100, m.nds) + " – " + daysIn(f.payDays) + " с даты приема-передачи результатов данного этапа работ.");
+        } else if (adv >= 100) {
+          pay.push("● Оплата в размере 100% от цены работ по этапу, что составляет " +
+            cash(s.price, m.nds) + " – " + daysIn(f.payDays) + " с даты " + whenAdv + ".");
+        } else {
+          pay.push("● Оплата в размере 100% от цены работ по этапу, что составляет " +
+            cash(s.price, m.nds) + " – " + daysIn(f.payDays) + " с даты приема-передачи результатов данного этапа работ.");
+        }
+        const termText = first
+          ? daysNom(s.days) + (adv > 0
+              ? " с даты внесения аванса за этап и передачи исходных данных, указанных в таблице выше (в зависимости от того, что произойдет позднее)."
+              : " с даты передачи исходных данных, указанных в таблице выше.")
+          : daysNom(s.days) + (adv > 0
+              ? " с даты приема-передачи результатов предыдущего этапа и внесения аванса за данный этап (в зависимости от того, что произойдет позднее)."
+              : " с даты приема-передачи результатов предыдущего этапа работ.");
+
+        B.push({ k: "p", t: "Этап №" + n + ". " + (s.name || "____________________"), cls: "db dat" });
+        B.push({ k: "p", t: n + ".1. Результаты работ по этапу:" });
+        (s.results.length ? s.results : ["________________"]).forEach((r) =>
+          B.push({ k: "p", t: "● " + r, cls: "di" }));
+        B.push({
+          k: "p",
+          t: n + ".2. При согласовании результатов работ по данному этапу допустимо внесение незначительных поправок по запросу Заказчика в количестве: не более " +
+            s.edits + " раз (блоков)." + (first ? " Здесь и далее – поправки вносятся в порядке, указанном в статье 4 Договора." : ""),
+        });
+        B.push({ k: "p", t: n + ".3. Сроки и цена работ по данному этапу:" });
+        B.push({
+          k: "tbl", widths: [8, 22, 70], keep: true,
+          rows: [
+            [{ b: [{ k: "p", t: n + ".3.1." }] }, { b: [{ k: "p", t: "Цена:" }] }, { b: [{ k: "p", t: cash(s.price, m.nds) }] }],
+            [{ b: [{ k: "p", t: n + ".3.2." }] }, { b: [{ k: "p", t: "Порядок оплаты:" }] }, { b: pay.map((t) => ({ k: "p", t })) }],
+            [{ b: [{ k: "p", t: n + ".3.3." }] }, { b: [{ k: "p", t: "Срок работ по этапу:" }] }, { b: [{ k: "p", t: termText }] }],
+          ],
+        });
+      });
+
+      B.push({ k: "at", t: "Прочие условия" });
+      P("1. Настоящий Состав работ составлен в двух подлинных экземплярах, по одному для каждой Стороны.");
+      P("2. Настоящий Состав работ является приложением и неотъемлемой частью заключенного Договора.");
+      B.push({ k: "sp" });
+      B.push({ k: "p", t: "Подписи Сторон:", cls: "db" });
+      const shortSign = (p, role) => ({
+        b: [{ k: "p", t: (role === "exec" ? "Исполнитель:" : "Заказчик:"), cls: "db" }]
+          .concat(signLines(p, role).map((l) => ({ k: "p", t: l }))),
+      });
+      B.push({ k: "tbl", widths: [50, 50], keep: true, rows: [[shortSign(f.exec, "exec"), shortSign(f.client, "client")]] });
+
+      /* ---------- ПРИЛОЖЕНИЕ №2: НДС ---------- */
+      if (f.app2) {
+        B.push({ k: "br" });
+        B.push({ k: "p", t: "Приложение № 2 к Договору №" + num + (f.date ? " от " + dmy(f.date) + " г." : ""), cls: "dc db" });
+        B.push({ k: "sp" });
+        APP2.forEach((x) => {
+          if (x.h) P(x.h);
+          else if (x.n) B.push({ k: "p", t: x.n, cls: "db dat" });
+          else P("• " + x.b, "di");
+        });
+        B.push({ k: "sp" });
+        B.push({ k: "p", t: "Подписи Сторон", cls: "db" });
+        B.push({ k: "tbl", widths: [50, 50], keep: true, rows: [[shortSign(f.exec, "exec"), shortSign(f.client, "client")]] });
+      }
+
+      return B;
+    }
+
+    /* =========================================================================
+       ДОГОВОР — 3/3: рендер (HTML + .docx), интерфейс, вкладки
+       ========================================================================= */
+
+    /* ── Вывод дерева в HTML (предпросмотр = печатный макет) ──────────────── */
+    function DocBlock({ b }) {
+      if (b.k === "sp") return <p>&nbsp;</p>;
+      if (b.k === "h") return <p className="dc db">{b.t}</p>;
+      if (b.k === "at") return <p className="db dat">{b.t}</p>;
+      if (b.k === "p") return <p className={b.cls || ""}>{b.t}</p>;
+      if (b.k === "tbl") {
+        return (
+          <table className={"dt" + (b.keep ? " keep" : "")}>
+            <tbody>
+              {b.rows.map((r, ri) => (
+                <tr key={ri}>
+                  {r.map((c, ci) => (
+                    <td key={ci} style={{ width: (b.widths[ci] || Math.floor(100 / r.length)) + "%" }}>
+                      {typeof c === "string"
+                        ? <p>{c}</p>
+                        : c.b.map((x, i) => <DocBlock key={i} b={x} />)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      }
+      return null;
+    }
+
+    // Документ делится на части по разрывам страниц ({k:'br'}): договор,
+    // Приложение №1, Приложение №2. Каждая часть — своя таблица .doc-frame,
+    // её thead/tfoot браузер повторяет на каждой странице PDF (колонтитулы).
+    function DocSheet({ blocks }) {
+      const parts = [[]];
+      blocks.forEach((b) => {
+        if (b.k === "br") parts.push([]);
+        else parts[parts.length - 1].push(b);
+      });
+      return (
+        <div className="doc doc-sheet">
+          {parts.map((part, i) => (
+            <table
+              key={i}
+              className={"doc-frame" + (i ? " doc-next" : "")}
+              style={i ? { breakBefore: "page", pageBreakBefore: "always" } : null}
+            >
+              <thead>
+                <tr><td className="doc-hpad">
+                  <div style={{ textAlign: "right" }}>
+                    <img src={DOC_LOGO_URI} alt="rezeda" style={{ width: "29mm", height: "auto", display: "inline-block" }} />
+                  </div>
+                </td></tr>
+              </thead>
+              <tfoot>
+                <tr><td className="doc-fpad"><div className="doc-foot">{DOC_FOOTER_TEXT}</div></td></tr>
+              </tfoot>
+              <tbody>
+                <tr><td>{part.map((b, j) => <DocBlock key={j} b={b} />)}</td></tr>
+              </tbody>
+            </table>
+          ))}
+        </div>
+      );
+    }
+
+    /* ── Вывод дерева в .docx ─────────────────────────────────────────────── */
+    const DOCX_URL = "https://unpkg.com/docx@9.7.1/dist/index.umd.cjs";
+    let docxLoading = null;
+    const loadDocx = () => {
+      if (window.docx) return Promise.resolve(window.docx);
+      if (!docxLoading) {
+        docxLoading = new Promise((res, rej) => {
+          const s = document.createElement("script");
+          s.src = DOCX_URL;
+          s.onload = () => (window.docx ? res(window.docx) : rej(new Error("библиотека docx не инициализировалась")));
+          s.onerror = () => { docxLoading = null; rej(new Error("нет доступа к CDN (unpkg.com)")); };
+          document.head.appendChild(s);
+        });
+      }
+      return docxLoading;
+    };
+    const b64bytes = (b64) => {
+      const bin = atob(b64);
+      const u = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      return u;
+    };
+    const dlBlob = (blob, name) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+    };
+
+    function docxBlocks(blocks, D) {
+      const AL = D.AlignmentType;
+      const nb = () => ({ style: D.BorderStyle.NONE, size: 0, color: "FFFFFF" });
+      const noBorders = { top: nb(), bottom: nb(), left: nb(), right: nb(), insideHorizontal: nb(), insideVertical: nb() };
+      const para = (b) => {
+        if (b.k === "sp") return new D.Paragraph({ children: [new D.TextRun({ text: "" })] });
+        const cls = b.cls || "";
+        const bold = b.k === "h" || b.k === "at" || cls.indexOf("db") >= 0;
+        const align = (b.k === "h" || cls.indexOf("dc") >= 0) ? AL.CENTER
+          : cls.indexOf("dr") >= 0 ? AL.RIGHT : AL.JUSTIFIED;
+        const indent = cls.indexOf("di2") >= 0 ? { left: 680 }
+          : cls.indexOf("di") >= 0 ? { left: 397 } : undefined;
+        return new D.Paragraph({
+          alignment: align,
+          indent: indent,
+          spacing: { before: (b.k === "at" || cls.indexOf("dat") >= 0) ? 140 : 0, after: 50, line: 262 },
+          children: [new D.TextRun({ text: b.t || "", bold: bold })],
+        });
+      };
+      const out = [];
+      blocks.forEach((b) => {
+        if (b.k === "br") { out.push(new D.Paragraph({ children: [new D.PageBreak()] })); return; }
+        if (b.k === "tbl") {
+          out.push(new D.Table({
+            width: { size: 100, type: D.WidthType.PERCENTAGE },
+            borders: noBorders,
+            rows: b.rows.map((r) => new D.TableRow({
+              cantSplit: !!b.keep,
+              children: r.map((c, ci) => new D.TableCell({
+                width: { size: b.widths[ci] || Math.floor(100 / r.length), type: D.WidthType.PERCENTAGE },
+                margins: { top: 20, bottom: 20, left: 0, right: 110 },
+                children: (typeof c === "string" ? [{ k: "p", t: c }] : c.b).map(para),
+              })),
+            })),
+          }));
+          // после таблицы — пустой абзац, иначе Word склеивает таблицы
+          out.push(new D.Paragraph({ children: [new D.TextRun({ text: "" })], spacing: { after: 0 } }));
+          return;
+        }
+        out.push(para(b));
+      });
+      return out;
+    }
+
+    function docFileName(m) {
+      const who = m.f.client.name ? " " + m.f.client.name.split(/\s+/)[0] : "";
+      return ("Договор " + (m.f.num || "б-н") + who).replace(/[\\/:*?"<>|]/g, "-");
+    }
+
+    function exportDocx(m) {
+      return loadDocx().then((D) => {
+        const doc = new D.Document({
+          creator: "REZEDA",
+          title: docFileName(m),
+          styles: {
+            default: {
+              document: {
+                run: { font: "Inter", size: 18, color: "000000" },
+                paragraph: { spacing: { after: 50, line: 262 }, alignment: D.AlignmentType.JUSTIFIED },
+              },
+            },
+          },
+          sections: [{
+            properties: {
+              page: {
+                size: { width: 11900, height: 16840 },
+                margin: { top: 1021, right: 851, bottom: 1021, left: 1134, header: 709, footer: 567 },
+              },
+            },
+            headers: {
+              default: new D.Header({
+                children: [new D.Paragraph({
+                  alignment: D.AlignmentType.RIGHT,
+                  spacing: { after: 0 },
+                  children: [new D.ImageRun({
+                    type: "png",
+                    data: b64bytes(DOC_LOGO_B64),
+                    transformation: { width: 110, height: 16 },
+                  })],
+                })],
+              }),
+            },
+            footers: {
+              default: new D.Footer({
+                children: [new D.Paragraph({
+                  alignment: D.AlignmentType.CENTER,
+                  children: [new D.TextRun({ text: DOC_FOOTER_TEXT })],
+                })],
+              }),
+            },
+            children: docxBlocks(docTree(m), D),
+          }],
+        });
+        return D.Packer.toBlob(doc);
+      }).then((blob) => dlBlob(blob, docFileName(m) + ".docx"));
+    }
+
+    /* ── Локальное хранение (единственное место с localStorage в проекте) ─── */
+    const LS_KEY = "rezeda.dogovor.v1";
+    // В некоторых окружениях (приватный режим, sandbox, data:-URL) хранилище
+    // отключено — тогда работают только кнопки «Экспорт / Импорт».
+    const STORAGE_OK = (() => {
+      try { localStorage.setItem(LS_KEY + ".test", "1"); localStorage.removeItem(LS_KEY + ".test"); return true; }
+      catch (e) { return false; }
+    })();
+    const lsLoad = () => {
+      try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (e) { return {}; }
+    };
+    const lsSave = (data) => {
+      try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch (e) { /* приватный режим / переполнение */ }
+    };
+    const mergeForm = (saved) => {
+      const f = Object.assign(initialDocForm(), saved || {});
+      f.exec = Object.assign(emptyExec(), (saved && saved.exec) || {});
+      f.client = Object.assign(emptyClient(), (saved && saved.client) || {});
+      const st = (saved && saved.stages && saved.stages.length) ? saved.stages : initialDocForm().stages;
+      f.stages = st.map((s, i) => Object.assign(emptyStage(f.disc, i), s));
+      return f;
+    };
+
+    /* ── Мелкие элементы формы ────────────────────────────────────────────── */
+    const F_IN = "mt-1 w-full hair bg-air px-3 py-2 text-sm font-normal outline-none focus:border-grape";
+    const F_LB = "text-[11px] font-medium uppercase tracking-[0.18em] text-black/40";
+
+    function Fld({ label, value, onChange, ph, type, area, rows, hint }) {
+      return (
+        <label className="block min-w-0">
+          <span className={F_LB}>{label}</span>
+          {area
+            ? <textarea rows={rows || 3} value={value || ""} placeholder={ph}
+                onChange={(e) => onChange(e.target.value)} className={F_IN + " resize-y leading-relaxed"} />
+            : <input type={type || "text"} value={value == null ? "" : value} placeholder={ph}
+                onChange={(e) => onChange(e.target.value)} className={F_IN} />}
+          {hint ? <span className="mt-1 block text-[11px] font-light text-black/40">{hint}</span> : null}
+        </label>
+      );
+    }
+
+    function Seg({ options, value, onChange }) {
+      return (
+        <div className="inline-flex hair">
+          {options.map(([k, l]) => (
+            <button key={k} onClick={() => onChange(k)}
+              className={"px-4 py-2 text-sm transition " +
+                (k === value ? "bg-night text-air" : "bg-air text-black/50 hover:text-ink hover:bg-steel")}>
+              {l}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function Chk({ label, checked, onChange, note }) {
+      return (
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)}
+            className="mt-0.5 w-4 h-4 accent-grape shrink-0" />
+          <span className="min-w-0">
+            <span className="block text-sm font-normal">{label}</span>
+            {note ? <span className="block text-[11px] font-light text-black/40">{note}</span> : null}
+          </span>
+        </label>
+      );
+    }
+
+    function DocSection({ title, note, open, onToggle, children }) {
+      return (
+        <div className="bg-air hair">
+          <button onClick={onToggle} className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left">
+            <span className="min-w-0">
+              <span className="block text-sm font-normal uppercase tracking-[0.14em]">{title}</span>
+              {note ? <span className="block text-[11px] font-light text-black/40 normal-case tracking-normal">{note}</span> : null}
+            </span>
+            <span className="shrink-0 text-black/35">{open ? "—" : "+"}</span>
+          </button>
+          {open ? <div className="px-5 pb-5 pt-4 border-t border-concrete space-y-4">{children}</div> : null}
+        </div>
+      );
+    }
+
+    /* ── Форма стороны ────────────────────────────────────────────────────── */
+    function PartyForm({ role, p, upd }) {
+      const isExec = role === "exec";
+      const kinds = isExec ? [["ip", "ИП"], ["ooo", "ООО"]] : [["person", "Физлицо"], ["ip", "ИП"], ["ooo", "ООО"]];
+      const g2 = "grid sm:grid-cols-2 gap-4";
+      return (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={F_LB}>Тип</span>
+            <Seg options={kinds} value={p.kind} onChange={(v) => upd({ kind: v })} />
+          </div>
+
+          <div className={g2}>
+            <Fld label={p.kind === "ooo" ? "Наименование (без «ООО»)" : "ФИО полностью"}
+              value={p.name} onChange={(v) => upd({ name: v })}
+              ph={p.kind === "ooo" ? "АзияСибИнвест" : "Галин Дмитрий Сергеевич"} />
+            <Fld label="ИНН" value={p.inn} onChange={(v) => upd({ inn: v })} />
+          </div>
+
+          {p.kind === "ooo" ? (
+            <div className={g2}>
+              <Fld label="ОГРН" value={p.ogrn} onChange={(v) => upd({ ogrn: v })} />
+              <Fld label="КПП" value={p.kpp} onChange={(v) => upd({ kpp: v })} />
+            </div>
+          ) : p.kind === "ip" ? (
+            <div className={g2}>
+              <Fld label="ОГРНИП" value={p.ogrn} onChange={(v) => upd({ ogrn: v })} />
+              <Fld label="Дата регистрации ИП" value={p.regDate} onChange={(v) => upd({ regDate: v })} ph="21.12.2016" />
+            </div>
+          ) : null}
+
+          <Fld label={p.kind === "ooo" ? "Юридический адрес" : "Адрес"} value={p.addr} onChange={(v) => upd({ addr: v })} />
+
+          {p.kind === "person" ? (
+            <Fld label="Паспорт" value={p.passport} onChange={(v) => upd({ passport: v })}
+              ph="серия 0000 № 000000, выдан ..." />
+          ) : null}
+
+          <div className={g2}>
+            <Fld label="E-mail" value={p.email} onChange={(v) => upd({ email: v })} />
+            <Fld label="Телефон" value={p.phone} onChange={(v) => upd({ phone: v })} />
+          </div>
+
+          {p.kind !== "person" ? (
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Fld label="Расчётный счёт" value={p.account} onChange={(v) => upd({ account: v })} />
+              <Fld label="Банк" value={p.bank} onChange={(v) => upd({ bank: v })} />
+              <Fld label="БИК" value={p.bik} onChange={(v) => upd({ bik: v })} />
+              <Fld label="Корр. счёт" value={p.corr} onChange={(v) => upd({ corr: v })} />
+            </div>
+          ) : null}
+
+          {p.kind === "ooo" ? (
+            <div className="space-y-4 pt-2 border-t border-concrete">
+              <div className={g2}>
+                <Fld label="Должность подписанта" value={p.signerTitle} onChange={(v) => upd({ signerTitle: v })}
+                  ph="генерального директора" hint="в родительном падеже: «в лице генерального директора …»" />
+                <Fld label="ФИО подписанта" value={p.signerName} onChange={(v) => upd({ signerName: v })}
+                  ph="Чекотовой Нины Александровны" hint="в родительном падеже" />
+              </div>
+              <div className={g2}>
+                <Fld label="Действует на основании" value={p.basis} onChange={(v) => upd({ basis: v })} ph="Устава" />
+                <Fld label="Подпись (в скобках)" value={p.signerShort} onChange={(v) => upd({ signerShort: v })} ph="Н.А. Чекотова" />
+              </div>
+              {!isExec ? (
+                <div className="space-y-3">
+                  <Chk label="Подписывает управляющая компания" checked={p.viaMc}
+                    onChange={(v) => upd({ viaMc: v })}
+                    note="«в лице генерального директора управляющей компании ООО «…» ФИО»" />
+                  {p.viaMc ? <Fld label="Наименование УК (без «ООО»)" value={p.mcName} onChange={(v) => upd({ mcName: v })} ph="Ретейл Групп" /> : null}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <Fld label="Подпись (в скобках)" value={p.signerShort} onChange={(v) => upd({ signerShort: v })}
+              ph="Д.С. Галин" hint="если пусто — соберётся из ФИО" />
+          )}
+
+          {isExec ? (
+            <div className="pt-2 border-t border-concrete">
+              <span className={F_LB}>Налоговый режим</span>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {TAX_MODES.map(([k, l]) => (
+                  <button key={k} onClick={() => upd({ tax: k })}
+                    className={"px-3 py-2 text-xs hair transition " +
+                      (p.tax === k ? "bg-night text-air border-night" : "bg-air text-black/55 hover:bg-steel")}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] font-light text-black/40">
+                НДС 5% выделяется автоматически (5/105) в общей цене и в каждом платеже.
+              </p>
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    /* ── Справочник профилей ──────────────────────────────────────────────── */
+    function ProfileBar({ list, current, onPick, onSave, onDelete, label }) {
+      return (
+        <div className="flex flex-wrap items-end gap-2 pb-4 border-b border-concrete">
+          <label className="min-w-0 flex-1">
+            <span className={F_LB}>{label}</span>
+            <select value=""
+              onChange={(e) => { if (e.target.value) onPick(e.target.value); }}
+              className={F_IN}>
+              <option value="">— выбрать сохранённый —</option>
+              {list.map((x) => <option key={x.id} value={x.id}>{x.profile || x.name || "без имени"}</option>)}
+            </select>
+          </label>
+          <button onClick={onSave} className="hair bg-sun px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] hover:brightness-95">
+            Сохранить
+          </button>
+          <button onClick={onDelete} disabled={!list.some((x) => x.id === current.id)}
+            className="hair bg-air px-4 py-2 text-xs uppercase tracking-[0.12em] text-black/50 hover:bg-steel disabled:opacity-40">
+            Удалить
+          </button>
+        </div>
+      );
+    }
+
+    /* ── Этапы ────────────────────────────────────────────────────────────── */
+    function StageRow({ s, i, total, advance, onChange, onDrop, onMove }) {
+      return (
+        <div className="hair bg-steel p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Этап №{i + 1}</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => onMove(-1)} disabled={i === 0}
+                className="hair bg-air px-2 py-1 text-xs disabled:opacity-30">↑</button>
+              <button onClick={() => onMove(1)} disabled={i === total - 1}
+                className="hair bg-air px-2 py-1 text-xs disabled:opacity-30">↓</button>
+              <button onClick={onDrop} className="hair bg-air px-2 py-1 text-xs text-black/50 hover:bg-air">Удалить</button>
+            </div>
+          </div>
+          <Fld label="Название этапа" value={s.name} onChange={(v) => onChange({ name: v })}
+            ph="Эскизный проект" />
+          <Fld label="Результаты работ по этапу" area rows={4} value={s.results}
+            onChange={(v) => onChange({ results: v })}
+            ph={"Каждая строка — отдельный пункт списка"} />
+          <div className="grid sm:grid-cols-4 gap-3">
+            <Fld label="Цена, ₽" type="number" value={s.price} onChange={(v) => onChange({ price: v })} />
+            <Fld label="Срок, раб. дн." type="number" value={s.days} onChange={(v) => onChange({ days: v })} />
+            <Fld label="Блоков правок" type="number" value={s.edits} onChange={(v) => onChange({ edits: v })} />
+            <Fld label="Аванс, %" type="number"
+              value={s.advance == null ? "" : s.advance}
+              ph={String(advance)}
+              onChange={(v) => onChange({ advance: v === "" ? null : Number(v) })}
+              hint="пусто = общий" />
+          </div>
+        </div>
+      );
+    }
+
+    /* ── Основной инструмент ──────────────────────────────────────────────── */
+    function ContractTool({ kpSnap }) {
+      const saved = useRef(lsLoad()).current;
+      const [form, setForm] = useState(() => (saved.form ? mergeForm(saved.form) : initialDocForm()));
+      const [execs, setExecs] = useState(() => (saved.execs && saved.execs.length ? saved.execs : PRESET_EXECS));
+      const [clients, setClients] = useState(() => (saved.clients && saved.clients.length ? saved.clients : PRESET_CLIENTS));
+      const [open, setOpen] = useState({ main: true, exec: false, client: false, obj: false, stages: true, extra: false });
+      const [busy, setBusy] = useState(false);
+      const [msg, setMsg] = useState("");
+      const fileRef = useRef(null);
+
+      const toggle = (k) => setOpen((p) => Object.assign({}, p, { [k]: !p[k] }));
+
+      // Автосохранение справочников и черновика (с задержкой, чтобы не писать на каждую букву)
+      useEffect(() => {
+        const t = setTimeout(() => lsSave({ form, execs, clients }), 400);
+        return () => clearTimeout(t);
+      }, [form, execs, clients]);
+
+      const upd = (patch) => setForm((p) => Object.assign({}, p, patch));
+      const updExec = (patch) => setForm((p) => Object.assign({}, p, { exec: Object.assign({}, p.exec, patch) }));
+      const updClient = (patch) => setForm((p) => Object.assign({}, p, { client: Object.assign({}, p.client, patch) }));
+      const updStage = (id, patch) => setForm((p) => Object.assign({}, p, {
+        stages: p.stages.map((s) => (s.id === id ? Object.assign({}, s, patch) : s)),
+      }));
+
+      const setDisc = (v) => setForm((p) => {
+        const patch = { disc: v };
+        // дефолтные исходные данные подменяем только если их не правили руками
+        if (!p.sources || p.sources === DOC_DISC[p.disc].sources) patch.sources = DOC_DISC[v].sources;
+        return Object.assign({}, p, patch);
+      });
+
+      const addStage = () => setForm((p) => Object.assign({}, p, {
+        stages: p.stages.concat([emptyStage(p.disc, p.stages.length)]),
+      }));
+      const dropStage = (id) => setForm((p) => Object.assign({}, p, {
+        stages: p.stages.length > 1 ? p.stages.filter((s) => s.id !== id) : p.stages,
+      }));
+      const moveStage = (i, dir) => setForm((p) => {
+        const j = i + dir;
+        if (j < 0 || j >= p.stages.length) return p;
+        const st = p.stages.slice();
+        const t = st[i]; st[i] = st[j]; st[j] = t;
+        return Object.assign({}, p, { stages: st });
+      });
+
+      // Перенос из калькулятора КП
+      const importKp = () => {
+        const snap = kpSnap && kpSnap.current;
+        if (!snap || !snap.items.length) {
+          setMsg("В калькуляторе КП не выбрано ни одного этапа — включите нужные разделы на вкладке «Коммерческое предложение».");
+          return;
+        }
+        const mine = snap.items.filter((it) => it.disc === form.disc);
+        const items = mine.length ? mine : snap.items;
+        const stages = items.map((it, i) => Object.assign(emptyStage(form.disc, i), {
+          name: it.label,
+          results: it.desc || "",
+          price: String(Math.round(it.cost)),
+          days: String(it.days || ""),
+        }));
+        const a = snap.area[form.disc];
+        upd({
+          stages,
+          area: a ? String(a) : form.area,
+          subtitle: form.subtitle || snap.title || "",
+        });
+        setMsg("Перенесено этапов: " + stages.length + (mine.length ? "" : " (из всех дисциплин КП)"));
+      };
+
+      // Профили
+      const pickExec = (id) => {
+        const x = execs.find((e) => e.id === id);
+        if (x) upd({ exec: Object.assign(emptyExec(), x) });
+      };
+      const saveExec = () => {
+        const p = Object.assign({}, form.exec);
+        if (!p.profile || p.profile === "Новый профиль") p.profile = p.name || "Профиль";
+        setExecs((list) => (list.some((e) => e.id === p.id) ? list.map((e) => (e.id === p.id ? p : e)) : list.concat([p])));
+        setMsg("Профиль Исполнителя сохранён на этом компьютере");
+      };
+      const delExec = () => {
+        setExecs((list) => list.filter((e) => e.id !== form.exec.id));
+        setMsg("Профиль Исполнителя удалён");
+      };
+      const pickClient = (id) => {
+        const x = clients.find((e) => e.id === id);
+        if (x) upd({ client: Object.assign(emptyClient(), x) });
+      };
+      const saveClient = () => {
+        const p = Object.assign({}, form.client);
+        if (!p.profile || p.profile === "Новый заказчик") p.profile = p.name || "Заказчик";
+        setClients((list) => (list.some((e) => e.id === p.id) ? list.map((e) => (e.id === p.id ? p : e)) : list.concat([p])));
+        setMsg("Заказчик сохранён на этом компьютере");
+      };
+      const delClient = () => {
+        setClients((list) => list.filter((e) => e.id !== form.client.id));
+        setMsg("Заказчик удалён из справочника");
+      };
+
+      // Резервная копия
+      const exportJson = () => {
+        dlBlob(new Blob([JSON.stringify({ form, execs, clients }, null, 2)], { type: "application/json" }),
+          "rezeda-dogovor-dannye.json");
+      };
+      const importJson = (file) => {
+        const r = new FileReader();
+        r.onload = () => {
+          try {
+            const d = JSON.parse(r.result);
+            if (d.execs) setExecs(d.execs);
+            if (d.clients) setClients(d.clients);
+            if (d.form) setForm(mergeForm(d.form));
+            setMsg("Данные загружены из файла");
+          } catch (e) { setMsg("Не удалось прочитать файл: " + e.message); }
+        };
+        r.readAsText(file);
+      };
+
+      const m = useMemo(() => docModel(form), [form]);
+      const blocks = useMemo(() => docTree(m), [m]);
+
+      const problems = [];
+      if (!form.num) problems.push("не указан номер договора");
+      if (!form.client.name) problems.push("не заполнен Заказчик");
+      if (!form.objAddr) problems.push("не указан адрес Объекта");
+      if (!m.stages.length) problems.push("нет этапов");
+      if (m.stages.some((s) => !s.price)) problems.push("есть этапы без цены");
+      if (m.stages.some((s) => !s.days)) problems.push("есть этапы без срока");
+      if (m.stages.some((s) => !s.name)) problems.push("есть этапы без названия");
+
+      const doWord = () => {
+        setBusy(true); setMsg("Готовим .docx…");
+        exportDocx(m)
+          .then(() => setMsg("Файл Word сохранён"))
+          .catch((e) => setMsg("Word не сформирован: " + e.message))
+          .then(() => setBusy(false));
+      };
+
+      return (
+        <div className="min-h-screen">
+          <div className="screen-only">
+            <header className="border-b border-concrete bg-air">
+              <div className="max-w-6xl mx-auto px-6 py-6 flex flex-col items-start gap-2">
+                <img src="LOGO.png" alt="rezeda" onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  style={{ filter: "brightness(0)" }} className="h-8 sm:h-10 w-auto object-contain object-left" />
+                <span className="text-xs font-medium uppercase tracking-[0.22em] text-black/50">Договор</span>
+              </div>
+            </header>
+
+            <main className="max-w-6xl mx-auto w-full px-6 pt-8 pb-10">
+              <div className="grid lg:grid-cols-[1fr_360px] gap-8 items-start">
+                <div className="space-y-4 min-w-0">
+
+                  <DocSection title="Договор" note="формат, номер, дата" open={open.main} onToggle={() => toggle("main")}>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className={F_LB}>Формат</span>
+                      <Seg options={[["arch", "Архитектура"], ["int", "Интерьер / дизайн-проект"]]}
+                        value={form.disc} onChange={setDisc} />
+                    </div>
+                    <div className="grid sm:grid-cols-3 gap-4">
+                      <Fld label="Номер договора" value={form.num} onChange={(v) => upd({ num: v })}
+                        ph={"8_" + String(yearOf(form.date)).slice(2)} />
+                      <Fld label="Дата" type="date" value={form.date} onChange={(v) => upd({ date: v })} />
+                      <Fld label="Город" value={form.city} onChange={(v) => upd({ city: v })} />
+                    </div>
+                    <Fld label="Подзаголовок (необязательно)" value={form.subtitle} onChange={(v) => upd({ subtitle: v })}
+                      ph="рабочая документация проекта освещения ТЦ «Ликон-2»"
+                      hint="выводится в скобках под названием договора" />
+                  </DocSection>
+
+                  <DocSection title="Исполнитель" note={form.exec.name || "наша сторона"} open={open.exec} onToggle={() => toggle("exec")}>
+                    <ProfileBar label="Профиль исполнителя" list={execs} current={form.exec}
+                      onPick={pickExec} onSave={saveExec} onDelete={delExec} />
+                    <PartyForm role="exec" p={form.exec} upd={updExec} />
+                  </DocSection>
+
+                  <DocSection title="Заказчик" note={form.client.name || "контрагент"} open={open.client} onToggle={() => toggle("client")}>
+                    <ProfileBar label="Сохранённые заказчики" list={clients} current={form.client}
+                      onPick={pickClient} onSave={saveClient} onDelete={delClient} />
+                    <PartyForm role="client" p={form.client} upd={updClient} />
+                  </DocSection>
+
+                  <DocSection title="Объект" note="адрес, площадь, исходные данные" open={open.obj} onToggle={() => toggle("obj")}>
+                    <Fld label={DOC_DISC[form.disc].addrLabel.replace(":", "")} value={form.objAddr}
+                      onChange={(v) => upd({ objAddr: v })} />
+                    <div className="grid sm:grid-cols-3 gap-4">
+                      <Fld label="Кадастровый номер" value={form.objCad} onChange={(v) => upd({ objCad: v })} ph="38:36:000012:11359" />
+                      <Fld label="Площадь, м²" type="number" value={form.area} onChange={(v) => upd({ area: v })} />
+                      <Fld label="Ставка за 1 м², ₽" type="number" value={form.rateManual}
+                        onChange={(v) => upd({ rateManual: v })}
+                        ph={m.area > 0 ? String(Math.round(m.total / m.area)) : "—"}
+                        hint="пусто = цена ÷ площадь" />
+                    </div>
+                    <Fld label="Исходные данные" area rows={3} value={form.sources}
+                      onChange={(v) => upd({ sources: v })} hint="каждая строка — отдельный пункт; пусто → «не требуется»" />
+                    <Fld label="Описание объекта / состава работ" area rows={3} value={form.objDesc}
+                      onChange={(v) => upd({ objDesc: v })}
+                      hint="необязательный текст перед этапами в Приложении №1" />
+                    <div className="grid sm:grid-cols-3 gap-4 pt-2 border-t border-concrete">
+                      <Fld label="Представитель: ФИО" value={form.repName} onChange={(v) => upd({ repName: v })} />
+                      <Fld label="Представитель: e-mail" value={form.repEmail} onChange={(v) => upd({ repEmail: v })} />
+                      <Fld label="Представитель: телефон" value={form.repPhone} onChange={(v) => upd({ repPhone: v })} />
+                    </div>
+                  </DocSection>
+
+                  <DocSection title="Этапы работ" note={m.stages.length + " " + plural(m.stages.length, ["этап", "этапа", "этапов"]) + " · " + rub(m.total)}
+                    open={open.stages} onToggle={() => toggle("stages")}>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={importKp}
+                        className="hair bg-lilac px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] hover:brightness-95">
+                        Перенести из КП
+                      </button>
+                      <button onClick={addStage}
+                        className="hair bg-air px-4 py-2 text-xs uppercase tracking-[0.12em] text-black/60 hover:bg-steel">
+                        + Этап
+                      </button>
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <Fld label="Аванс по умолчанию, %" type="number" value={form.advance}
+                        onChange={(v) => upd({ advance: Number(v) })} hint="0 = полная постоплата, 100 = полная предоплата" />
+                      <Fld label="Срок оплаты, раб. дн." type="number" value={form.payDays}
+                        onChange={(v) => upd({ payDays: Number(v) })} />
+                    </div>
+                    {form.stages.map((s, i) => (
+                      <StageRow key={s.id} s={s} i={i} total={form.stages.length} advance={form.advance}
+                        onChange={(patch) => updStage(s.id, patch)}
+                        onDrop={() => dropStage(s.id)}
+                        onMove={(d) => moveStage(i, d)} />
+                    ))}
+                  </DocSection>
+
+                  <DocSection title="Условия и приложения" note="неразглашение, НДС, сроки, суд"
+                    open={open.extra} onToggle={() => toggle("extra")}>
+                    <Chk label="Условие о неразглашении" checked={form.nda} onChange={(v) => upd({ nda: v })}
+                      note="в п. 7.5 и 7.6 добавляется отсрочка публикации материалов (формат «ФОРТУНА»)" />
+                    {form.nda ? (
+                      <Fld label="Отсрочка публикации, лет" type="number" value={form.ndaYears}
+                        onChange={(v) => upd({ ndaYears: Number(v) || 0 })} />
+                    ) : null}
+                    <Chk label="Приложение №2 — налоговые заверения и НДС" checked={form.app2}
+                      onChange={(v) => upd({ app2: v })}
+                      note="соглашение об условиях применения НДС (ст. 431.2 ГК РФ)" />
+                    {form.disc === "int" ? (
+                      <Chk label="Указывать формулу расчёта цены" checked={form.formula}
+                        onChange={(v) => upd({ formula: v })}
+                        note="«Ставка за 1 м2 х Площадь Объекта» в п. 2.1" />
+                    ) : null}
+                    <div className="pt-2 border-t border-concrete space-y-4">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className={F_LB}>Срок в ст. 3</span>
+                        <Seg options={[["days", "Рабочие дни"], ["dates", "С … по …"]]}
+                          value={form.termMode} onChange={(v) => upd({ termMode: v })} />
+                      </div>
+                      {form.termMode === "dates" ? (
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <Fld label="Начало" type="date" value={form.dateFrom} onChange={(v) => upd({ dateFrom: v })} />
+                          <Fld label="Окончание" type="date" value={form.dateTo} onChange={(v) => upd({ dateTo: v })} />
+                        </div>
+                      ) : (
+                        <p className="text-[11px] font-light text-black/40">
+                          Сумма сроков этапов: {daysNom(m.days)}
+                        </p>
+                      )}
+                      <Fld label="Суд" value={form.court} onChange={(v) => upd({ court: v })} />
+                    </div>
+                  </DocSection>
+                </div>
+
+                {/* Правая панель: итоги и вывод */}
+                <div className="lg:sticky lg:top-4 space-y-4">
+                  <div className="bg-night text-air p-6 space-y-4">
+                    <div>
+                      <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/40">Общая стоимость</div>
+                      <div className="mt-1 text-3xl font-normal">{rub(m.total)}</div>
+                      {m.nds ? (
+                        <div className="mt-1 text-xs font-light text-white/50">
+                          в том числе НДС 5% — {mon2(ndsOf(m.total))} ₽
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-xs font-light">
+                      <div className="border-t border-white/15 pt-2">
+                        <div className="text-white/40">Срок</div>
+                        <div className="text-sm">{m.days} раб. дн.</div>
+                      </div>
+                      <div className="border-t border-white/15 pt-2">
+                        <div className="text-white/40">Ставка</div>
+                        <div className="text-sm">{m.rate > 0 ? mon0(m.rate) + " ₽/м²" : "—"}</div>
+                      </div>
+                    </div>
+                    <div className="text-xs font-light text-white/50 border-t border-white/15 pt-3">
+                      {DOC_DISC[form.disc].label}
+                      {form.nda ? " · неразглашение" : ""}
+                      {form.app2 ? " · Прил. №2" : ""}
+                    </div>
+
+                    <button onClick={doWord} disabled={busy}
+                      className="w-full bg-sun text-night font-medium py-3 hover:brightness-95 transition disabled:opacity-50">
+                      {busy ? "Формируем…" : "Скачать Word (.docx)"}
+                    </button>
+                    <button onClick={() => window.print()}
+                      className="w-full bg-lilac text-night font-medium py-3 hover:brightness-95 transition">
+                      Сформировать PDF
+                    </button>
+                    <p className="text-[11px] font-light text-white/40">
+                      PDF — через диалог печати браузера: «Принтер → Сохранить как PDF», поля не менять.
+                    </p>
+                  </div>
+
+                  {problems.length ? (
+                    <div className="hair bg-air p-4">
+                      <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Не заполнено</div>
+                      <ul className="mt-2 space-y-1 text-xs font-light text-black/60">
+                        {problems.map((p, i) => <li key={i}>— {p}</li>)}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  <div className="hair bg-air p-4 space-y-2">
+                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Данные на этом ПК</div>
+                    <p className="text-[11px] font-light text-black/45">
+                      {STORAGE_OK
+                        ? "Профили и черновик сохраняются в браузере автоматически."
+                        : "Браузер запретил локальное хранилище — автосохранение не работает. Сохраняйте данные кнопкой «Экспорт»."}
+                    </p>
+                    <div className="flex gap-2">
+                      <button onClick={exportJson}
+                        className="flex-1 hair bg-air px-3 py-2 text-xs uppercase tracking-[0.12em] text-black/60 hover:bg-steel">
+                        Экспорт
+                      </button>
+                      <button onClick={() => fileRef.current && fileRef.current.click()}
+                        className="flex-1 hair bg-air px-3 py-2 text-xs uppercase tracking-[0.12em] text-black/60 hover:bg-steel">
+                        Импорт
+                      </button>
+                      <input ref={fileRef} type="file" accept=".json,application/json" className="hidden"
+                        onChange={(e) => { if (e.target.files && e.target.files[0]) importJson(e.target.files[0]); e.target.value = ""; }} />
+                    </div>
+                  </div>
+
+                  {msg ? (
+                    <div className="hair bg-sun/40 p-3 text-xs font-light">
+                      {msg}
+                      <button onClick={() => setMsg("")} className="ml-2 text-black/40 hover:text-ink">✕</button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </main>
+          </div>
+
+          {/* Документ: и предпросмотр на экране, и печатный макет */}
+          <div className="pb-24">
+            <div className="no-print max-w-6xl mx-auto px-6 pb-3 text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">
+              Предпросмотр документа
+            </div>
+            <DocSheet blocks={blocks} />
+          </div>
+        </div>
+      );
+    }
+
+    /* ── Вкладки ──────────────────────────────────────────────────────────── */
+    function Root() {
+      const [tab, setTab] = useState("kp");
+      const kpSnap = useRef(null);
+      const TABS = [["kp", "Коммерческое предложение"], ["doc", "Договор"]];
+      return (
+        <div className="min-h-screen">
+          <div className="no-print bg-steel border-b border-concrete">
+            <div className="max-w-6xl mx-auto px-6 flex items-stretch">
+              {TABS.map(([k, l]) => (
+                <button key={k} onClick={() => setTab(k)}
+                  className={"px-5 py-3 text-[11px] font-medium uppercase tracking-[0.18em] border-b-2 transition " +
+                    (tab === k ? "border-night text-ink bg-air" : "border-transparent text-black/35 hover:text-black/60")}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* Обе вкладки смонтированы: состояние не теряется, а скрытая ветка
+              не попадает в печать (display:none выключает и печать) */}
+          <div style={{ display: tab === "kp" ? "block" : "none" }}><App snapRef={kpSnap} /></div>
+          <div style={{ display: tab === "doc" ? "block" : "none" }}><ContractTool kpSnap={kpSnap} /></div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
   </script>
 </body>
 </html>
