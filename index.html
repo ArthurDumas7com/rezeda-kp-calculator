@@ -2402,12 +2402,13 @@
       id: uid(), profile: "Новый профиль", kind: "ip", name: "", regDate: "", inn: "", ogrn: "",
       addr: "", account: "", bank: "", bik: "", corr: "", email: "", phone: "",
       signerTitle: "Индивидуальный предприниматель", signerName: "", signerShort: "", tax: "usn",
+      updatedAt: 0,
     });
     const emptyClient = () => ({
       id: uid(), profile: "Новый заказчик", kind: "person", name: "", inn: "", kpp: "", ogrn: "",
       regDate: "", addr: "", passport: "", bank: "", bik: "", account: "", corr: "",
       email: "", phone: "", signerTitle: "", signerName: "", signerShort: "",
-      basis: "Устава", viaMc: false, mcName: "",
+      basis: "Устава", viaMc: false, mcName: "", updatedAt: 0,
     });
 
     // Предзаполненные профили Исполнителя (реквизиты из договора 8_26 и шаблонов)
@@ -3284,6 +3285,53 @@
       return f;
     };
 
+    /* ── Сервер данных на этом компьютере ─────────────────────────────────
+       Хранилище справочников — этот ПК (server/rezeda-server.js). Сайт при
+       этом остаётся автономным: если сервер не отвечает, работаем на
+       localStorage, а изменения уходят на сервер при следующей связи.
+       ──────────────────────────────────────────────────────────────────── */
+    const SRV_KEY = "rezeda.dogovor.server";
+    const SRV_DEFAULT = "http://localhost:8765";
+    // страница открыта с самого сервера → адрес известен, спрашивать нечего
+    const SRV_SELF = location.protocol === "http:" || location.protocol === "https:";
+    const srvLoadUrl = () => {
+      try { return localStorage.getItem(SRV_KEY) || SRV_DEFAULT; } catch (e) { return SRV_DEFAULT; }
+    };
+    const srvSaveUrl = (u) => { try { localStorage.setItem(SRV_KEY, u); } catch (e) {} };
+    const srvBase = (u) => (SRV_SELF ? location.origin : String(u || "").trim().replace(/\/+$/, ""));
+
+    const srvFetch = (base, path, opt) => {
+      if (!base) return Promise.reject(new Error("не указан адрес сервера"));
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 4000);
+      return fetch(base + path, Object.assign({ signal: ctl.signal, cache: "no-store" }, opt || {}))
+        .then((r) => { if (!r.ok) throw new Error("сервер ответил " + r.status); return r.json(); })
+        .finally(() => clearTimeout(timer));
+    };
+    // браузерные тексты ошибок в интерфейсе не показываем
+    const srvErr = (e) => (e && (e.name === "AbortError" || /Failed to fetch|NetworkError|ERR_/i.test(e.message || "")))
+      ? "нет связи" : ((e && e.message) || "ошибка");
+    const srvGet = (base) => srvFetch(base, "/api/data");
+    const srvPut = (base, execs, clients) => srvFetch(base, "/api/data", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ execs, clients }),
+    });
+
+    // Слияние справочников: побеждает запись с более поздним updatedAt.
+    // Удаления переживают синхронизацию как «надгробия» (deleted: true) —
+    // иначе удалённый профиль вернулся бы с устройства, которое его помнит.
+    const mergeDir = (a, b) => {
+      const map = new Map();
+      (a || []).concat(b || []).forEach((x) => {
+        if (!x || !x.id) return;
+        const cur = map.get(x.id);
+        if (!cur || (x.updatedAt || 0) >= (cur.updatedAt || 0)) map.set(x.id, x);
+      });
+      return Array.from(map.values());
+    };
+    const alive = (list) => (list || []).filter((x) => x && !x.deleted);
+
     /* ── Мелкие элементы формы ────────────────────────────────────────────── */
     const F_IN = "mt-1 w-full hair bg-air px-3 py-2 text-sm font-normal outline-none focus:border-grape";
     const F_LB = "text-[11px] font-medium uppercase tracking-[0.18em] text-black/40";
@@ -3510,6 +3558,10 @@
       const [busy, setBusy] = useState(false);
       const [msg, setMsg] = useState("");
       const fileRef = useRef(null);
+      // адрес сервера данных: когда страница открыта с него самого — известен
+      const [srvUrl, setSrvUrl] = useState(srvLoadUrl);
+      const [sync, setSync] = useState({ state: "idle" });
+      const base = srvBase(srvUrl);
 
       const toggle = (k) => setOpen((p) => Object.assign({}, p, { [k]: !p[k] }));
 
@@ -3518,6 +3570,41 @@
         const t = setTimeout(() => lsSave({ form, execs, clients }), 400);
         return () => clearTimeout(t);
       }, [form, execs, clients]);
+
+      // Получить справочники с сервера (quiet — молча, при открытии вкладки)
+      const pull = (quiet) => {
+        if (!base) { setSync({ state: "off", msg: "адрес не указан" }); return; }
+        setSync({ state: "busy" });
+        srvGet(base).then((d) => {
+          setExecs((l) => mergeDir(l, d.execs));
+          setClients((l) => mergeDir(l, d.clients));
+          setSync({ state: "ok", at: Date.now() });
+          if (!quiet) setMsg("Справочники получены с сервера данных");
+        }).catch((e) => {
+          setSync({ state: "off", msg: srvErr(e) });
+          if (!quiet) setMsg("Сервер данных недоступен (" + srvErr(e) + ") — работаем с локальной копией.");
+        });
+      };
+      // Отправить справочники на сервер. Сервер сливает их со своими и
+      // возвращает результат — так изменения с разных устройств не затирают друг друга.
+      const pushDirs = (ex, cl, loud) => {
+        if (!base) {
+          setSync({ state: "off", msg: "адрес не указан" });
+          if (loud) setMsg("Не указан адрес сервера данных.");
+          return;
+        }
+        setSync({ state: "busy" });
+        srvPut(base, ex, cl).then((d) => {
+          setExecs((l) => mergeDir(l, d.execs));
+          setClients((l) => mergeDir(l, d.clients));
+          setSync({ state: "ok", at: Date.now() });
+          if (loud) setMsg("Справочники синхронизированы с сервером данных");
+        }).catch((e) => {
+          setSync({ state: "pending", msg: srvErr(e) });
+          if (loud) setMsg("Сервер данных не ответил (" + srvErr(e) + ") — изменения остались на этом устройстве.");
+        });
+      };
+      useEffect(() => { pull(true); }, []);
 
       const upd = (patch) => setForm((p) => Object.assign({}, p, patch));
       const updExec = (patch) => setForm((p) => Object.assign({}, p, { exec: Object.assign({}, p.exec, patch) }));
@@ -3577,13 +3664,18 @@
         if (x) upd({ exec: Object.assign(emptyExec(), x) });
       };
       const saveExec = () => {
-        const p = Object.assign({}, form.exec);
+        const p = Object.assign({}, form.exec, { updatedAt: Date.now(), deleted: false });
         if (!p.profile || p.profile === "Новый профиль") p.profile = p.name || "Профиль";
-        setExecs((list) => (list.some((e) => e.id === p.id) ? list.map((e) => (e.id === p.id ? p : e)) : list.concat([p])));
-        setMsg("Профиль Исполнителя сохранён на этом компьютере");
+        const next = execs.some((e) => e.id === p.id) ? execs.map((e) => (e.id === p.id ? p : e)) : execs.concat([p]);
+        setExecs(next);
+        upd({ exec: p });
+        pushDirs(next, clients);
+        setMsg("Профиль Исполнителя сохранён");
       };
       const delExec = () => {
-        setExecs((list) => list.filter((e) => e.id !== form.exec.id));
+        const next = execs.map((e) => (e.id === form.exec.id ? Object.assign({}, e, { deleted: true, updatedAt: Date.now() }) : e));
+        setExecs(next);
+        pushDirs(next, clients);
         setMsg("Профиль Исполнителя удалён");
       };
       const pickClient = (id) => {
@@ -3591,13 +3683,18 @@
         if (x) upd({ client: Object.assign(emptyClient(), x) });
       };
       const saveClient = () => {
-        const p = Object.assign({}, form.client);
+        const p = Object.assign({}, form.client, { updatedAt: Date.now(), deleted: false });
         if (!p.profile || p.profile === "Новый заказчик") p.profile = p.name || "Заказчик";
-        setClients((list) => (list.some((e) => e.id === p.id) ? list.map((e) => (e.id === p.id ? p : e)) : list.concat([p])));
-        setMsg("Заказчик сохранён на этом компьютере");
+        const next = clients.some((e) => e.id === p.id) ? clients.map((e) => (e.id === p.id ? p : e)) : clients.concat([p]);
+        setClients(next);
+        upd({ client: p });
+        pushDirs(execs, next);
+        setMsg("Заказчик сохранён");
       };
       const delClient = () => {
-        setClients((list) => list.filter((e) => e.id !== form.client.id));
+        const next = clients.map((e) => (e.id === form.client.id ? Object.assign({}, e, { deleted: true, updatedAt: Date.now() }) : e));
+        setClients(next);
+        pushDirs(execs, next);
         setMsg("Заказчик удалён из справочника");
       };
 
@@ -3611,10 +3708,10 @@
         r.onload = () => {
           try {
             const d = JSON.parse(r.result);
-            if (d.execs) setExecs(d.execs);
-            if (d.clients) setClients(d.clients);
+            if (d.execs) setExecs((l) => mergeDir(l, d.execs));
+            if (d.clients) setClients((l) => mergeDir(l, d.clients));
             if (d.form) setForm(mergeForm(d.form));
-            setMsg("Данные загружены из файла");
+            setMsg("Данные из файла добавлены к справочникам");
           } catch (e) { setMsg("Не удалось прочитать файл: " + e.message); }
         };
         r.readAsText(file);
@@ -3631,6 +3728,14 @@
       if (m.stages.some((s) => !s.price)) problems.push("есть этапы без цены");
       if (m.stages.some((s) => !s.days)) problems.push("есть этапы без срока");
       if (m.stages.some((s) => !s.name)) problems.push("есть этапы без названия");
+
+      const SYNC_DOT = { ok: "bg-grape", busy: "bg-sun", pending: "bg-dawn", off: "bg-concrete", idle: "bg-concrete" };
+      const syncText =
+        sync.state === "ok" ? "Сервер данных на связи · исполнителей " + alive(execs).length + ", заказчиков " + alive(clients).length
+        : sync.state === "busy" ? "Обмен с сервером данных…"
+        : sync.state === "idle" ? "Проверяем сервер данных…"
+        : sync.state === "pending" ? "Сохранено локально: сервер не ответил. Нажмите «Синхронизировать», когда он будет включён."
+        : "Сервер данных недоступен — справочники берутся из этого браузера" + (sync.msg ? " (" + sync.msg + ")" : "");
 
       const doWord = () => {
         setBusy(true); setMsg("Готовим .docx…");
@@ -3673,13 +3778,13 @@
                   </DocSection>
 
                   <DocSection title="Исполнитель" note={form.exec.name || "наша сторона"} open={open.exec} onToggle={() => toggle("exec")}>
-                    <ProfileBar label="Профиль исполнителя" list={execs} current={form.exec}
+                    <ProfileBar label="Профиль исполнителя" list={alive(execs)} current={form.exec}
                       onPick={pickExec} onSave={saveExec} onDelete={delExec} />
                     <PartyForm role="exec" p={form.exec} upd={updExec} />
                   </DocSection>
 
                   <DocSection title="Заказчик" note={form.client.name || "контрагент"} open={open.client} onToggle={() => toggle("client")}>
-                    <ProfileBar label="Сохранённые заказчики" list={clients} current={form.client}
+                    <ProfileBar label="Сохранённые заказчики" list={alive(clients)} current={form.client}
                       onPick={pickClient} onSave={saveClient} onDelete={delClient} />
                     <PartyForm role="client" p={form.client} upd={updClient} />
                   </DocSection>
@@ -3820,12 +3925,34 @@
                     </div>
                   ) : null}
 
-                  <div className="hair bg-air p-4 space-y-2">
-                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Данные на этом ПК</div>
+                  <div className="hair bg-air p-4 space-y-3">
+                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Данные и синхронизация</div>
+
+                    <div className="flex items-start gap-2">
+                      <span className={"mt-1 shrink-0 w-2 h-2 " + (SYNC_DOT[sync.state] || "bg-concrete")} />
+                      <span className="text-[11px] font-light text-black/60">{syncText}</span>
+                    </div>
+
+                    {!SRV_SELF ? (
+                      <label className="block">
+                        <span className={F_LB}>Адрес сервера данных</span>
+                        <input value={srvUrl} placeholder={SRV_DEFAULT} className={F_IN}
+                          onChange={(e) => { setSrvUrl(e.target.value); srvSaveUrl(e.target.value); }} />
+                        <span className="mt-1 block text-[11px] font-light text-black/40">
+                          компьютер-хранилище: запустите на нём data-server.cmd
+                        </span>
+                      </label>
+                    ) : null}
+
+                    <button onClick={() => pushDirs(execs, clients, true)}
+                      className="w-full hair bg-air px-3 py-2 text-xs uppercase tracking-[0.12em] text-black/60 hover:bg-steel">
+                      Синхронизировать
+                    </button>
+
                     <p className="text-[11px] font-light text-black/45">
                       {STORAGE_OK
-                        ? "Профили и черновик сохраняются в браузере автоматически."
-                        : "Браузер запретил локальное хранилище — автосохранение не работает. Сохраняйте данные кнопкой «Экспорт»."}
+                        ? "Копия справочников и черновик лежат в этом браузере — договор готовится и без сети."
+                        : "Браузер запретил локальное хранилище — работают только сервер и кнопка «Экспорт»."}
                     </p>
                     <div className="flex gap-2">
                       <button onClick={exportJson}

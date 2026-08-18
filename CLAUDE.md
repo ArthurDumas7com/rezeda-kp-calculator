@@ -32,12 +32,21 @@ Generates the full package — Договор + Приложение №1 «Со
 - **`kpSnapshot`** (written to a ref by `App`, read by «Перенести из КП») carries stage name/description/price/days + площадь per discipline. It transfers *their* КП wording — do not invent deliverable lists.
 - Presets: `PRESET_EXECS` (ИП Галин Д.С., ИП Мороз А.В.) and `PRESET_CLIENTS` (ООО «АзияСибИнвест», ИП Чекотова Н.А.) — taken from the sample contracts, editable and stored per-user.
 
+### Сервер данных (`server/rezeda-server.js`)
+The user's own machine is the store for counterparty legal data; other devices read it over the LAN. **This is the one part of the project that is not `index.html`** — a dependency-free Node script (`node server/rezeda-server.js`, launcher `data-server.cmd`).
+
+- **Endpoints**: `GET /api/ping`, `GET /api/data`, `PUT /api/data` (server-side merge), plus static serving of the repo root, so `http://<lan-ip>:8765/` opens the app itself. CORS is open (`*`) because the page is often opened from `file://`, which has an opaque origin.
+- **Data lives OUTSIDE the repo** — `%LOCALAPPDATA%\REZEDA\dogovor-data.json` (+ `.bak`, atomic tmp+rename write). ИНН/паспорта/банковские реквизиты must never reach git; `.gitignore` has a second line of defence.
+- **Merge rule, shared by server and client** (`mergeDir`): same `id` → the record with the newer `updatedAt` wins; deletions are **tombstones** (`deleted: true`), so a profile deleted on one device is not resurrected by another that still remembers it. UI lists are filtered through `alive()`.
+- **Offline-first**: `SRV_SELF` (page opened over http) → same-origin; otherwise the address comes from the «Адрес сервера данных» field (`rezeda.dogovor.server` in localStorage, default `http://localhost:8765`). `srvFetch` aborts after 4 s. Every failure path falls back to the localStorage copy — the app must stay fully usable with the server off. `pull()` runs once on mount (read-only); the «Синхронизировать» button is a two-way exchange (`pushDirs`, server merges and returns the union).
+- Optional `REZEDA_PORT` / `REZEDA_TOKEN` / `REZEDA_DATA_DIR`. User-facing instructions: `server/README.md`.
+
 ### «Инструменты компании»
 An internal toggle in the black `SummaryBar` (`showTools` state) — **screen-only, never in the client PDF** (`PrintProposal`). Shows per-service окупаемость% (`stagePayback` vs `DAY_NORM`) and отклонение к рынку РФ% (`stageMarketDelta` vs `MARKET_RPM`), plus a company aggregate.
 
 ## Critical constraints (do not break these)
 
-- **No build step, no backend.** The whole app is `index.html`. There is no dev server, no npm, no bundler. (A Python 3.12 and a portable Node do exist on this machine — usable for *inspecting* files, e.g. unzipping .docx — but never as a runtime dependency of the app.) Verify visually in a browser.
+- **No build step for the app.** The whole UI is `index.html` — there is no bundler and no framework build. The only server-side code is the optional data server in `server/`, which the app never requires to function. There is no dev server, no npm, no bundler. (A Python 3.12 and a portable Node do exist on this machine — usable for *inspecting* files, e.g. unzipping .docx — but never as a runtime dependency of the app.) Verify visually in a browser.
 - **All libraries are CDN `<script>` tags** loaded at runtime: React 18 + ReactDOM (unpkg UMD), `@babel/standalone` (the app code is one `<script type="text/babel" data-presets="react">` block, compiled in-browser), Tailwind Play CDN (`cdn.tailwindcss.com`) with inline `tailwind.config`, Inter via Google Fonts, and `docx` (lazy, only on Word export).
 - **No persistence in the КП tab.** Never use `localStorage`/`sessionStorage` there — all КП state lives in React (`useState`) only. **The only exception is the «Договор» tab**, where the user explicitly asked for counterparty data to persist on their computer: key `rezeda.dogovor.v1`, written through `lsSave`/`lsLoad` (both swallow errors), guarded by `STORAGE_OK`, with «Экспорт / Импорт» JSON as the fallback and backup path.
 - **No fabricated statistics.** Sales-impact percentages are content, not computed — only use values the user provides.

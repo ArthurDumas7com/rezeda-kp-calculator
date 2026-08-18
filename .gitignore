@@ -11,3 +11,10 @@ desktop.ini
 *~
 .vscode/
 .idea/
+
+# Данные сервера договоров — юрреквизиты контрагентов. Основное хранилище
+# лежит вне репозитория (%LOCALAPPDATA%\REZEDA), это страховка на случай,
+# если кто-то запустит сервер с REZEDA_DATA_DIR внутри папки проекта.
+server/data/
+*dogovor-data*.json
+rezeda-dogovor-dannye.json
