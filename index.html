@@ -3260,8 +3260,11 @@
     const SRV_DEFAULT = "http://localhost:8765";
     // страница открыта с самого сервера → адрес известен, спрашивать нечего
     const SRV_SELF = location.protocol === "http:" || location.protocol === "https:";
+    // Пусто — решает srvBase: адрес страницы либо localhost для файла с диска.
+    // Здесь нельзя подставлять localhost по умолчанию: на https-хостинге это
+    // даёт запрет смешанного содержимого вместо честного «хранилища тут нет».
     const srvLoadUrl = () => {
-      try { return localStorage.getItem(SRV_KEY) || SRV_DEFAULT; } catch (e) { return SRV_DEFAULT; }
+      try { return localStorage.getItem(SRV_KEY) || ""; } catch (e) { return ""; }
     };
     const srvSaveUrl = (u) => { try { localStorage.setItem(SRV_KEY, u); } catch (e) {} };
     // Ключ доступа (пароль сервера). Хранится только на устройстве — в коде и в
