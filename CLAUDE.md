@@ -32,8 +32,17 @@ Generates the full package — Договор + Приложение №1 «Со
 - **`kpSnapshot`** (written to a ref by `App`, read by «Перенести из КП») carries stage name/description/price/days + площадь per discipline. It transfers *their* КП wording — do not invent deliverable lists.
 - Presets: `PRESET_EXECS` (ИП Галин Д.С., ИП Мороз А.В.) and `PRESET_CLIENTS` (ООО «АзияСибИнвест», ИП Чекотова Н.А.) — taken from the sample contracts, editable and stored per-user.
 
-### Сервер данных (`server/rezeda-server.js`)
-The user's own machine is the store for counterparty legal data; other devices read it over the LAN. **This is the one part of the project that is not `index.html`** — a dependency-free Node script (`node server/rezeda-server.js`); the launcher lives next to the data, outside the repo.
+### Общий справочник контрагентов (GitHub)
+**Основное хранилище** — файл `dogovor-data.json` в отдельном **публичном** репозитории `ArthurDumas7com/rezeda-dogovor-data`. Реквизиты юрлиц клиент считает открытыми данными (ЕГРЮЛ/ЕГРИП), поэтому чтение идёт без авторизации — справочник виден с любого устройства, включая ссылку на GitHub Pages.
+
+- **Чтение** — `raw.githubusercontent.com` с `?t=` для обхода кэша (`ghRead`). Отдаётся с `Access-Control-Allow-Origin: *`, токен не нужен.
+- **Запись** (`ghWrite`) — Contents API: GET за `sha` и текущим содержимым → `mergeDir` → PUT. Токен (fine-grained, `Contents: read and write` только на этот репозиторий) вводится один раз на устройство и живёт в `localStorage` (`rezeda.dogovor.ghtoken`). Без токена интерфейс честно пишет «только чтение».
+- **Кириллица**: `btoa` на неё падает, поэтому base64 через `TextEncoder`/`TextDecoder` (`b64FromUtf8`/`utf8FromB64`). Ответ API содержит base64 с переносами строк — `atob` их игнорирует по спецификации, но перед декодом они всё равно вычищаются.
+- **Отдельный репозиторий, а не папка в этом**: запись в репозиторий сайта каждый раз запускала бы пересборку Pages (лимит ~10 сборок в час) и засоряла историю приложения.
+- Данные в приложении **не хранятся**: `PRESET_EXECS`/`PRESET_CLIENTS` — пустые массивы.
+
+### Сервер данных (`server/rezeda-server.js`) — необязательная вторая копия
+Раньше это было основное хранилище; после переезда справочника на GitHub — вторая, необязательная копия для работы внутри офиса (в интерфейсе спрятан в свёрнутый блок). The user's own machine can still serve the directory over the LAN. **This is the one part of the project that is not `index.html`** — a dependency-free Node script (`node server/rezeda-server.js`); the launcher lives next to the data, outside the repo.
 
 - **Endpoints**: `GET /api/ping`, `GET /api/data`, `PUT /api/data` (server-side merge), plus static serving of the repo root, so `http://<lan-ip>:8765/` opens the app itself. CORS is open (`*`) because the page is often opened from `file://`, which has an opaque origin.
 - **Data lives OUTSIDE the repo** — sibling folder `../КП автоматизация Резеда - сервер/dogovor-data.json` (+ `.bak`, atomic tmp+rename write), which also holds the launcher `Запустить сервер данных.cmd`. **The repo is public**, so counterparty legal data (ИНН, счета, паспорта) must never be committed: `PRESET_EXECS`/`PRESET_CLIENTS` are deliberately empty arrays and the directory is seeded in that JSON file instead. `.gitignore` is a second line of defence.
