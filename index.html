@@ -2411,46 +2411,12 @@
       basis: "Устава", viaMc: false, mcName: "", updatedAt: 0,
     });
 
-    // Предзаполненные профили Исполнителя (реквизиты из договора 8_26 и шаблонов)
-    const PRESET_EXECS = [
-      Object.assign(emptyExec(), {
-        id: "exec-galin", profile: "ИП Галин Д.С.", kind: "ip",
-        name: "Галин Дмитрий Сергеевич", regDate: "21.12.2016",
-        inn: "380101026220", ogrn: "316385000153095",
-        addr: "665835, Иркутская обл, Ангарск г, Ленинградский пр-кт, дом № 15, кв. 72",
-        account: "40802810712500015766", bank: 'ООО "Банк Точка"',
-        bik: "044525104", corr: "30101810745374525104",
-        email: "rzda.studio@gmail.com", phone: "",
-        signerTitle: "Индивидуальный предприниматель", signerShort: "Д.С. Галин", tax: "nds5",
-      }),
-      Object.assign(emptyExec(), {
-        id: "exec-moroz", profile: "ИП Мороз А.В.", kind: "ip",
-        name: "Мороз Анна Владимировна", regDate: "30.09.2019",
-        inn: "381003279270", ogrn: "319385000096121",
-        email: "rzda.studio@gmail.com",
-        signerTitle: "Индивидуальный предприниматель", signerShort: "А.В. Мороз", tax: "patent",
-      }),
-    ];
-
-    // Заказчики из присланных договоров — сразу доступны в справочнике.
-    // У ИП Чекотовой в шаблонах ФОРТУНА указаны только ФИО и подпись,
-    // ИНН/ОГРНИП нужно дозаполнить один раз и нажать «Сохранить».
-    const PRESET_CLIENTS = [
-      Object.assign(emptyClient(), {
-        id: "cli-aziasibinvest", profile: "ООО «АзияСибИнвест»", kind: "ooo",
-        name: "АзияСибИнвест", inn: "3849073269", kpp: "384901001", ogrn: "1193850012817",
-        addr: "664035, г. Иркутск, ул. Челябинская, д. 25, офис 301",
-        bank: "Байкальский банк ПАО Сбербанк", bik: "042520607",
-        account: "40702810718350029439", corr: "30101810900000000607",
-        email: "chief.ov@all38.pro", phone: "+79021722747",
-        signerTitle: "генерального директора", signerName: "Чекотовой Нины Александровны",
-        signerShort: "Н.А. Чекотова", basis: "Устава", viaMc: true, mcName: "Ретейл Групп",
-      }),
-      Object.assign(emptyClient(), {
-        id: "cli-chekotova-ip", profile: "ИП Чекотова Н.А.", kind: "ip",
-        name: "Чекотова Нина Александровна", signerShort: "Н.А. Чекотова",
-      }),
-    ];
+    // Справочники контрагентов ЗДЕСЬ НЕ ХРАНЯТСЯ. Репозиторий публичный, а это
+    // юридические данные: ИНН, банковские счета, паспорта. Записи живут в
+    // хранилище на компьютере бюро (см. server/README.md) и приезжают оттуда
+    // по сети; локальная копия остаётся в браузере для работы без связи.
+    const PRESET_EXECS = [];
+    const PRESET_CLIENTS = [];
 
     const emptyStage = (disc, i) => ({
       id: uid(), name: "", results: "", price: "", days: "",
@@ -3552,8 +3518,8 @@
     function ContractTool({ kpSnap }) {
       const saved = useRef(lsLoad()).current;
       const [form, setForm] = useState(() => (saved.form ? mergeForm(saved.form) : initialDocForm()));
-      const [execs, setExecs] = useState(() => (saved.execs && saved.execs.length ? saved.execs : PRESET_EXECS));
-      const [clients, setClients] = useState(() => (saved.clients && saved.clients.length ? saved.clients : PRESET_CLIENTS));
+      const [execs, setExecs] = useState(() => saved.execs || PRESET_EXECS);
+      const [clients, setClients] = useState(() => saved.clients || PRESET_CLIENTS);
       const [open, setOpen] = useState({ main: true, exec: false, client: false, obj: false, stages: true, extra: false });
       const [busy, setBusy] = useState(false);
       const [msg, setMsg] = useState("");
