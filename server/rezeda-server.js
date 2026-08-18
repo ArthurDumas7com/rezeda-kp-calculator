@@ -136,6 +136,7 @@ const server = http.createServer((req, res) => {
   if (req.method === "OPTIONS") { cors(res); res.writeHead(204); res.end(); return; }
 
   if (p === "/api/ping") {
+    if (!authOk(req, url)) return json(res, 401, { error: "Нужен ключ доступа", authRequired: true });
     const s = readStore();
     return json(res, 200, {
       ok: true, name: os.hostname(),
@@ -144,7 +145,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (p === "/api/data") {
-    if (!authOk(req, url)) return json(res, 401, { error: "Нужен ключ доступа" });
+    if (!authOk(req, url)) return json(res, 401, { error: "Нужен ключ доступа", authRequired: true });
     if (req.method === "GET") return json(res, 200, readStore());
     if (req.method === "PUT") {
       let body = "";
@@ -204,7 +205,9 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log("");
   console.log("  Данные:              " + DATA_FILE);
   console.log("  Сейчас в базе:       исполнителей " + alive(s.execs) + ", заказчиков " + alive(s.clients));
-  console.log("  Доступ:              " + (TOKEN ? "по ключу REZEDA_TOKEN" : "без ключа, только локальная сеть"));
+  console.log("  Доступ:              " + (TOKEN
+    ? "по ключу (" + TOKEN.slice(0, 2) + "***, задан в REZEDA_TOKEN)"
+    : "без ключа, только локальная сеть"));
   console.log("");
   console.log("  Окно можно свернуть. Закрытие окна останавливает сервер: сайт");
   console.log("  продолжит работать, но общие данные станут недоступны.");

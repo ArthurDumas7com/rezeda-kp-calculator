@@ -3264,25 +3264,38 @@
       try { return localStorage.getItem(SRV_KEY) || SRV_DEFAULT; } catch (e) { return SRV_DEFAULT; }
     };
     const srvSaveUrl = (u) => { try { localStorage.setItem(SRV_KEY, u); } catch (e) {} };
+    // Ключ доступа (пароль сервера). Хранится только на устройстве — в коде и в
+    // репозитории его нет. Нужен, когда сервер запущен с REZEDA_TOKEN.
+    const KEY_KEY = "rezeda.dogovor.key";
+    const srvLoadKey = () => { try { return localStorage.getItem(KEY_KEY) || ""; } catch (e) { return ""; } };
+    const srvSaveKey = (k) => { try { localStorage.setItem(KEY_KEY, k); } catch (e) {} };
     const srvBase = (u) => (SRV_SELF ? location.origin : String(u || "").trim().replace(/\/+$/, ""));
 
-    const srvFetch = (base, path, opt) => {
+    const srvFetch = (base, path, opt, key) => {
       if (!base) return Promise.reject(new Error("не указан адрес сервера"));
       const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 4000);
-      return fetch(base + path, Object.assign({ signal: ctl.signal, cache: "no-store" }, opt || {}))
-        .then((r) => { if (!r.ok) throw new Error("сервер ответил " + r.status); return r.json(); })
+      const timer = setTimeout(() => ctl.abort(), 8000);
+      const o = Object.assign({ signal: ctl.signal, cache: "no-store" }, opt || {});
+      o.headers = Object.assign({}, o.headers, key ? { "X-Rezeda-Key": key } : {});
+      return fetch(base + path, o)
+        .then((r) => {
+          if (r.status === 401) {
+            const e = new Error("нужен ключ доступа"); e.authRequired = true; throw e;
+          }
+          if (!r.ok) throw new Error("сервер ответил " + r.status);
+          return r.json();
+        })
         .finally(() => clearTimeout(timer));
     };
     // браузерные тексты ошибок в интерфейсе не показываем
     const srvErr = (e) => (e && (e.name === "AbortError" || /Failed to fetch|NetworkError|ERR_/i.test(e.message || "")))
       ? "нет связи" : ((e && e.message) || "ошибка");
-    const srvGet = (base) => srvFetch(base, "/api/data");
-    const srvPut = (base, execs, clients) => srvFetch(base, "/api/data", {
+    const srvGet = (base, key) => srvFetch(base, "/api/data", null, key);
+    const srvPut = (base, execs, clients, key) => srvFetch(base, "/api/data", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ execs, clients }),
-    });
+    }, key);
 
     // Слияние справочников: побеждает запись с более поздним updatedAt.
     // Удаления переживают синхронизацию как «надгробия» (deleted: true) —
@@ -3526,6 +3539,7 @@
       const fileRef = useRef(null);
       // адрес сервера данных: когда страница открыта с него самого — известен
       const [srvUrl, setSrvUrl] = useState(srvLoadUrl);
+      const [srvKey, setSrvKey] = useState(srvLoadKey);
       const [sync, setSync] = useState({ state: "idle" });
       const base = srvBase(srvUrl);
 
@@ -3541,14 +3555,16 @@
       const pull = (quiet) => {
         if (!base) { setSync({ state: "off", msg: "адрес не указан" }); return; }
         setSync({ state: "busy" });
-        srvGet(base).then((d) => {
+        srvGet(base, srvKey).then((d) => {
           setExecs((l) => mergeDir(l, d.execs));
           setClients((l) => mergeDir(l, d.clients));
           setSync({ state: "ok", at: Date.now() });
           if (!quiet) setMsg("Справочники получены с сервера данных");
         }).catch((e) => {
-          setSync({ state: "off", msg: srvErr(e) });
-          if (!quiet) setMsg("Сервер данных недоступен (" + srvErr(e) + ") — работаем с локальной копией.");
+          setSync({ state: e.authRequired ? "auth" : "off", msg: srvErr(e) });
+          if (!quiet) setMsg(e.authRequired
+            ? "Сервер просит ключ доступа — введите его в поле «Ключ доступа»."
+            : "Сервер данных недоступен (" + srvErr(e) + ") — работаем с локальной копией.");
         });
       };
       // Отправить справочники на сервер. Сервер сливает их со своими и
@@ -3560,14 +3576,16 @@
           return;
         }
         setSync({ state: "busy" });
-        srvPut(base, ex, cl).then((d) => {
+        srvPut(base, ex, cl, srvKey).then((d) => {
           setExecs((l) => mergeDir(l, d.execs));
           setClients((l) => mergeDir(l, d.clients));
           setSync({ state: "ok", at: Date.now() });
           if (loud) setMsg("Справочники синхронизированы с сервером данных");
         }).catch((e) => {
-          setSync({ state: "pending", msg: srvErr(e) });
-          if (loud) setMsg("Сервер данных не ответил (" + srvErr(e) + ") — изменения остались на этом устройстве.");
+          setSync({ state: e.authRequired ? "auth" : "pending", msg: srvErr(e) });
+          if (loud) setMsg(e.authRequired
+            ? "Неверный или пустой ключ доступа — изменения остались на этом устройстве."
+            : "Сервер данных не ответил (" + srvErr(e) + ") — изменения остались на этом устройстве.");
         });
       };
       useEffect(() => { pull(true); }, []);
@@ -3695,11 +3713,12 @@
       if (m.stages.some((s) => !s.days)) problems.push("есть этапы без срока");
       if (m.stages.some((s) => !s.name)) problems.push("есть этапы без названия");
 
-      const SYNC_DOT = { ok: "bg-grape", busy: "bg-sun", pending: "bg-dawn", off: "bg-concrete", idle: "bg-concrete" };
+      const SYNC_DOT = { ok: "bg-grape", busy: "bg-sun", pending: "bg-dawn", auth: "bg-dawn", off: "bg-concrete", idle: "bg-concrete" };
       const syncText =
         sync.state === "ok" ? "Сервер данных на связи · исполнителей " + alive(execs).length + ", заказчиков " + alive(clients).length
         : sync.state === "busy" ? "Обмен с сервером данных…"
         : sync.state === "idle" ? "Проверяем сервер данных…"
+        : sync.state === "auth" ? "Нужен ключ доступа — введите пароль сервера ниже"
         : sync.state === "pending" ? "Сохранено локально: сервер не ответил. Нажмите «Синхронизировать», когда он будет включён."
         : "Сервер данных недоступен — справочники берутся из этого браузера" + (sync.msg ? " (" + sync.msg + ")" : "");
 
@@ -3909,6 +3928,13 @@
                         </span>
                       </label>
                     ) : null}
+
+                    <label className="block">
+                      <span className={F_LB}>Ключ доступа</span>
+                      <input type="password" value={srvKey} placeholder="если сервер без пароля — оставьте пустым"
+                        className={F_IN}
+                        onChange={(e) => { setSrvKey(e.target.value); srvSaveKey(e.target.value); }} />
+                    </label>
 
                     <button onClick={() => pushDirs(execs, clients, true)}
                       className="w-full hair bg-air px-3 py-2 text-xs uppercase tracking-[0.12em] text-black/60 hover:bg-steel">
