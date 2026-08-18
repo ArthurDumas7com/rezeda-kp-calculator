@@ -3269,10 +3269,21 @@
     const KEY_KEY = "rezeda.dogovor.key";
     const srvLoadKey = () => { try { return localStorage.getItem(KEY_KEY) || ""; } catch (e) { return ""; } };
     const srvSaveKey = (k) => { try { localStorage.setItem(KEY_KEY, k); } catch (e) {} };
-    const srvBase = (u) => (SRV_SELF ? location.origin : String(u || "").trim().replace(/\/+$/, ""));
+    const srvBase = (u) => {
+      const t = String(u || "").trim().replace(/\/+$/, "");
+      if (t) return t;                       // задан вручную — он и главный
+      if (SRV_SELF) return location.origin;  // страница открыта с сервера
+      return SRV_DEFAULT;                    // файл с диска на своём компьютере
+    };
 
     const srvFetch = (base, path, opt, key) => {
       if (!base) return Promise.reject(new Error("не указан адрес сервера"));
+      // страница по https не имеет права обращаться к http-адресу
+      if (location.protocol === "https:" && base.indexOf("http://") === 0) {
+        const e = new Error("страница открыта по https, а сервер по http — браузер это блокирует");
+        e.mixed = true;
+        return Promise.reject(e);
+      }
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 8000);
       const o = Object.assign({ signal: ctl.signal, cache: "no-store" }, opt || {});
@@ -3284,6 +3295,9 @@
         .then((r) => {
           if (r.status === 401) {
             const e = new Error("нужен ключ доступа"); e.authRequired = true; throw e;
+          }
+          if (r.status === 404) {
+            const e = new Error("по этому адресу нет хранилища"); e.noServer = true; throw e;
           }
           if (!r.ok) throw new Error("сервер ответил " + r.status);
           return r.json();
@@ -3564,10 +3578,12 @@
           setSync({ state: "ok", at: Date.now() });
           if (!quiet) setMsg("Справочники получены с сервера данных");
         }).catch((e) => {
-          setSync({ state: e.authRequired ? "auth" : "off", msg: srvErr(e) });
+          setSync({ state: e.authRequired ? "auth" : e.noServer ? "none" : "off", msg: srvErr(e) });
           if (!quiet) setMsg(e.authRequired
             ? "Сервер просит ключ доступа — введите его в поле «Ключ доступа»."
-            : "Сервер данных недоступен (" + srvErr(e) + ") — работаем с локальной копией.");
+            : e.noServer
+              ? "По этому адресу общего хранилища нет — справочники берутся из этого браузера."
+              : "Сервер данных недоступен (" + srvErr(e) + ") — работаем с локальной копией.");
         });
       };
       // Отправить справочники на сервер. Сервер сливает их со своими и
@@ -3585,7 +3601,7 @@
           setSync({ state: "ok", at: Date.now() });
           if (loud) setMsg("Справочники синхронизированы с сервером данных");
         }).catch((e) => {
-          setSync({ state: e.authRequired ? "auth" : "pending", msg: srvErr(e) });
+          setSync({ state: e.authRequired ? "auth" : e.noServer ? "none" : "pending", msg: srvErr(e) });
           if (loud) setMsg(e.authRequired
             ? "Неверный или пустой ключ доступа — изменения остались на этом устройстве."
             : "Сервер данных не ответил (" + srvErr(e) + ") — изменения остались на этом устройстве.");
@@ -3716,12 +3732,13 @@
       if (m.stages.some((s) => !s.days)) problems.push("есть этапы без срока");
       if (m.stages.some((s) => !s.name)) problems.push("есть этапы без названия");
 
-      const SYNC_DOT = { ok: "bg-grape", busy: "bg-sun", pending: "bg-dawn", auth: "bg-dawn", off: "bg-concrete", idle: "bg-concrete" };
+      const SYNC_DOT = { ok: "bg-grape", busy: "bg-sun", pending: "bg-dawn", auth: "bg-dawn", none: "bg-concrete", off: "bg-concrete", idle: "bg-concrete" };
       const syncText =
         sync.state === "ok" ? "Сервер данных на связи · исполнителей " + alive(execs).length + ", заказчиков " + alive(clients).length
         : sync.state === "busy" ? "Обмен с сервером данных…"
         : sync.state === "idle" ? "Проверяем сервер данных…"
         : sync.state === "auth" ? "Нужен ключ доступа — введите пароль сервера ниже"
+        : sync.state === "none" ? "Общего хранилища по этому адресу нет — справочники живут в этом браузере"
         : sync.state === "pending" ? "Сохранено локально: сервер не ответил. Нажмите «Синхронизировать», когда он будет включён."
         : "Сервер данных недоступен — справочники берутся из этого браузера" + (sync.msg ? " (" + sync.msg + ")" : "");
 
@@ -3921,16 +3938,14 @@
                       <span className="text-[11px] font-light text-black/60">{syncText}</span>
                     </div>
 
-                    {!SRV_SELF ? (
-                      <label className="block">
-                        <span className={F_LB}>Адрес сервера данных</span>
-                        <input value={srvUrl} placeholder={SRV_DEFAULT} className={F_IN}
-                          onChange={(e) => { setSrvUrl(e.target.value); srvSaveUrl(e.target.value); }} />
-                        <span className="mt-1 block text-[11px] font-light text-black/40">
-                          компьютер-хранилище: запустите на нём data-server.cmd
-                        </span>
-                      </label>
-                    ) : null}
+                    <label className="block">
+                      <span className={F_LB}>Адрес сервера данных</span>
+                      <input value={srvUrl} placeholder={SRV_SELF ? "адрес этой страницы" : SRV_DEFAULT} className={F_IN}
+                        onChange={(e) => { setSrvUrl(e.target.value); srvSaveUrl(e.target.value); }} />
+                      <span className="mt-1 block text-[11px] font-light text-black/40">
+                        пусто — {SRV_SELF ? "адрес этой страницы" : "компьютер, где запущена кнопка сервера"}
+                      </span>
+                    </label>
 
                     <label className="block">
                       <span className={F_LB}>Ключ доступа</span>
