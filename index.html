@@ -3228,6 +3228,99 @@
       }).then((blob) => dlBlob(blob, docFileName(m) + ".docx"));
     }
 
+    /* ── Общий справочник на GitHub ───────────────────────────────────────
+       Реквизиты юрлиц — открытые данные (ЕГРЮЛ/ЕГРИП), поэтому справочник
+       лежит в публичном репозитории: читается с любого устройства без входа,
+       а запись идёт токеном, который есть только у бюро.
+       ──────────────────────────────────────────────────────────────────── */
+    const GH = { owner: "ArthurDumas7com", repo: "rezeda-dogovor-data", path: "dogovor-data.json", branch: "main" };
+    const GH_RAW = "https://raw.githubusercontent.com/" + GH.owner + "/" + GH.repo + "/" + GH.branch + "/" + GH.path;
+    const GH_API = "https://api.github.com/repos/" + GH.owner + "/" + GH.repo + "/contents/" + GH.path;
+    const GHT_KEY = "rezeda.dogovor.ghtoken";
+    const ghLoadToken = () => { try { return localStorage.getItem(GHT_KEY) || ""; } catch (e) { return ""; } };
+    const ghSaveToken = (t) => { try { localStorage.setItem(GHT_KEY, t); } catch (e) {} };
+
+    // base64 ⇄ UTF-8: btoa сам по себе ломается на кириллице
+    const b64FromUtf8 = (s) => {
+      const bytes = new TextEncoder().encode(s);
+      let bin = "";
+      bytes.forEach((b) => { bin += String.fromCharCode(b); });
+      return btoa(bin);
+    };
+    const utf8FromB64 = (b) => {
+      const bin = atob(String(b).replace(/\s+/g, ""));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
+    };
+
+    const ghHeaders = (token) => ({
+      Accept: "application/vnd.github+json",
+      Authorization: "Bearer " + token,
+      "X-GitHub-Api-Version": "2022-11-28",
+    });
+    const withTimeout = (ms) => {
+      const ctl = new AbortController();
+      return { signal: ctl.signal, done: setTimeout(() => ctl.abort(), ms) };
+    };
+
+    // Чтение — без токена, через raw (лимиты выше, чем у API)
+    const ghRead = () => {
+      const t = withTimeout(8000);
+      return fetch(GH_RAW + "?t=" + Date.now(), { cache: "no-store", signal: t.signal })
+        .then((r) => {
+          if (!r.ok) throw new Error("справочник не прочитался (" + r.status + ")");
+          return r.json();
+        })
+        .finally(() => clearTimeout(t.done));
+    };
+
+    // Запись: читаем текущий файл (нужен sha), сливаем, кладём обратно.
+    // Слияние на стороне клиента — то же правило, что у локального сервера.
+    const ghWrite = (execs, clients, token) => {
+      const t = withTimeout(15000);
+      return fetch(GH_API + "?ref=" + GH.branch + "&t=" + Date.now(),
+                   { cache: "no-store", headers: ghHeaders(token), signal: t.signal })
+        .then((r) => (r.status === 404 ? null : r.json().then((j) => {
+          if (!r.ok) { const e = new Error(j.message || ("HTTP " + r.status)); e.status = r.status; throw e; }
+          return j;
+        })))
+        .then((cur) => {
+          let base = { execs: [], clients: [] };
+          if (cur && cur.content) { try { base = JSON.parse(utf8FromB64(cur.content)); } catch (e) {} }
+          const next = {
+            execs: mergeDir(base.execs, execs),
+            clients: mergeDir(base.clients, clients),
+            updatedAt: Date.now(),
+          };
+          return fetch(GH_API, {
+            method: "PUT",
+            headers: Object.assign({ "Content-Type": "application/json" }, ghHeaders(token)),
+            body: JSON.stringify({
+              message: "Справочник: " + alive(next.execs).length + " исполнителей, " + alive(next.clients).length + " заказчиков",
+              content: b64FromUtf8(JSON.stringify(next, null, 2)),
+              branch: GH.branch,
+              sha: cur ? cur.sha : undefined,
+            }),
+          }).then((r) => {
+            if (r.ok) return next;
+            return r.json().then((j) => {
+              const e = new Error(j.message || ("HTTP " + r.status));
+              e.status = r.status;
+              throw e;
+            });
+          });
+        })
+        .finally(() => clearTimeout(t.done));
+    };
+    const ghErr = (e) => {
+      if (!e) return "ошибка";
+      if (e.status === 401 || e.status === 403) return "токен не принят";
+      if (e.status === 409) return "кто-то сохранил одновременно, повторите";
+      if (e.name === "AbortError") return "нет связи";
+      return e.message || "ошибка";
+    };
+
     /* ── Локальное хранение (единственное место с localStorage в проекте) ─── */
     const LS_KEY = "rezeda.dogovor.v1";
     // В некоторых окружениях (приватный режим, sandbox, data:-URL) хранилище
@@ -3560,6 +3653,9 @@
       // адрес сервера данных: когда страница открыта с него самого — известен
       const [srvUrl, setSrvUrl] = useState(srvLoadUrl);
       const [srvKey, setSrvKey] = useState(srvLoadKey);
+      const [ghToken, setGhToken] = useState(ghLoadToken);
+      const [gh, setGh] = useState({ state: "idle" });
+      const [srvOpen, setSrvOpen] = useState(false);
       const [sync, setSync] = useState({ state: "idle" });
       const base = srvBase(srvUrl);
 
@@ -3571,7 +3667,35 @@
         return () => clearTimeout(t);
       }, [form, execs, clients]);
 
-      // Получить справочники с сервера (quiet — молча, при открытии вкладки)
+      // Общий справочник с сайта — основное хранилище, читается всегда
+      const pullGh = (quiet) => {
+        setGh({ state: "busy" });
+        return ghRead().then((d) => {
+          setExecs((l) => mergeDir(l, d.execs));
+          setClients((l) => mergeDir(l, d.clients));
+          setGh({ state: "ok", at: Date.now() });
+          if (!quiet) setMsg("Справочник получен с сайта");
+        }).catch((e) => {
+          setGh({ state: "off", msg: ghErr(e) });
+          if (!quiet) setMsg("Общий справочник не прочитался (" + ghErr(e) + ") — работаем с копией в браузере.");
+        });
+      };
+      // Запись в общий справочник — только с токеном
+      const pushGh = (ex, cl, loud) => {
+        if (!ghToken) { setGh({ state: "readonly" }); return Promise.resolve(); }
+        setGh({ state: "busy" });
+        return ghWrite(ex, cl, ghToken).then((d) => {
+          setExecs((l) => mergeDir(l, d.execs));
+          setClients((l) => mergeDir(l, d.clients));
+          setGh({ state: "ok", at: Date.now() });
+          if (loud) setMsg("Справочник сохранён на сайте — он виден со всех устройств");
+        }).catch((e) => {
+          setGh({ state: "error", msg: ghErr(e) });
+          if (loud) setMsg("На сайт не сохранилось: " + ghErr(e));
+        });
+      };
+
+      // Получить справочники с локального сервера (quiet — молча, при открытии)
       const pull = (quiet) => {
         if (!base) { setSync({ state: "off", msg: "адрес не указан" }); return; }
         setSync({ state: "busy" });
@@ -3592,9 +3716,13 @@
       // Отправить справочники на сервер. Сервер сливает их со своими и
       // возвращает результат — так изменения с разных устройств не затирают друг друга.
       const pushDirs = (ex, cl, loud) => {
+        pushGh(ex, cl, loud);
+        // Про локальный сервер говорим вслух, только когда он и есть хранилище:
+        // иначе его молчание перебивало бы сообщение об успешной записи на сайт.
+        const loudSrv = loud && !ghToken;
         if (!base) {
           setSync({ state: "off", msg: "адрес не указан" });
-          if (loud) setMsg("Не указан адрес сервера данных.");
+          if (loudSrv) setMsg("Не указан адрес сервера данных.");
           return;
         }
         setSync({ state: "busy" });
@@ -3602,15 +3730,15 @@
           setExecs((l) => mergeDir(l, d.execs));
           setClients((l) => mergeDir(l, d.clients));
           setSync({ state: "ok", at: Date.now() });
-          if (loud) setMsg("Справочники синхронизированы с сервером данных");
+          if (loudSrv) setMsg("Справочники синхронизированы с сервером данных");
         }).catch((e) => {
           setSync({ state: e.authRequired ? "auth" : e.noServer ? "none" : "pending", msg: srvErr(e) });
-          if (loud) setMsg(e.authRequired
+          if (loudSrv) setMsg(e.authRequired
             ? "Неверный или пустой ключ доступа — изменения остались на этом устройстве."
             : "Сервер данных не ответил (" + srvErr(e) + ") — изменения остались на этом устройстве.");
         });
       };
-      useEffect(() => { pull(true); }, []);
+      useEffect(() => { pullGh(true); pull(true); }, []);
 
       const upd = (patch) => setForm((p) => Object.assign({}, p, patch));
       const updExec = (patch) => setForm((p) => Object.assign({}, p, { exec: Object.assign({}, p.exec, patch) }));
@@ -3734,6 +3862,17 @@
       if (m.stages.some((s) => !s.price)) problems.push("есть этапы без цены");
       if (m.stages.some((s) => !s.days)) problems.push("есть этапы без срока");
       if (m.stages.some((s) => !s.name)) problems.push("есть этапы без названия");
+
+      const ghText =
+        gh.state === "ok" ? "Общий справочник: " + alive(execs).length + " " + plural(alive(execs).length, ["исполнитель", "исполнителя", "исполнителей"]) +
+            ", " + alive(clients).length + " " + plural(alive(clients).length, ["заказчик", "заказчика", "заказчиков"]) +
+            (ghToken ? " · сохранение включено" : " · только чтение")
+        : gh.state === "busy" ? "Обмен с общим справочником…"
+        : gh.state === "idle" ? "Читаем общий справочник…"
+        : gh.state === "readonly" ? "Без токена справочник только читается — записи останутся на этом устройстве"
+        : gh.state === "error" ? "Не сохранилось на сайт: " + (gh.msg || "")
+        : "Общий справочник недоступен (" + (gh.msg || "") + ") — работаем с копией в браузере";
+      const GH_DOT = { ok: "bg-grape", busy: "bg-sun", error: "bg-dawn", readonly: "bg-lilac", idle: "bg-concrete", off: "bg-concrete" };
 
       const SYNC_DOT = { ok: "bg-grape", busy: "bg-sun", pending: "bg-dawn", auth: "bg-dawn", none: "bg-concrete", off: "bg-concrete", idle: "bg-concrete" };
       const syncText =
@@ -3936,36 +4075,57 @@
                   <div className="hair bg-air p-4 space-y-3">
                     <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-black/40">Данные и синхронизация</div>
 
+                    {/* Общий справочник на сайте — основное хранилище */}
                     <div className="flex items-start gap-2">
-                      <span className={"mt-1 shrink-0 w-2 h-2 " + (SYNC_DOT[sync.state] || "bg-concrete")} />
-                      <span className="text-[11px] font-light text-black/60">{syncText}</span>
+                      <span className={"mt-1 shrink-0 w-2 h-2 " + (GH_DOT[gh.state] || "bg-concrete")} />
+                      <span className="text-[11px] font-light text-black/60">{ghText}</span>
                     </div>
 
                     <label className="block">
-                      <span className={F_LB}>Адрес сервера данных</span>
-                      <input value={srvUrl} placeholder={SRV_SELF ? "адрес этой страницы" : SRV_DEFAULT} className={F_IN}
-                        onChange={(e) => { setSrvUrl(e.target.value); srvSaveUrl(e.target.value); }} />
+                      <span className={F_LB}>Токен для сохранения</span>
+                      <input type="password" value={ghToken} placeholder="без него справочник только читается"
+                        className={F_IN}
+                        onChange={(e) => { setGhToken(e.target.value); ghSaveToken(e.target.value); }} />
                       <span className="mt-1 block text-[11px] font-light text-black/40">
-                        пусто — {SRV_SELF ? "адрес этой страницы" : "компьютер, где запущена кнопка сервера"}
+                        github.com → Settings → Developer settings → Fine-grained token
+                        на репозиторий {GH.repo}, право Contents: read and write
                       </span>
                     </label>
 
-                    <label className="block">
-                      <span className={F_LB}>Ключ доступа</span>
-                      <input type="password" value={srvKey} placeholder="если сервер без пароля — оставьте пустым"
-                        className={F_IN}
-                        onChange={(e) => { setSrvKey(e.target.value); srvSaveKey(e.target.value); }} />
-                    </label>
-
-                    <button onClick={() => pushDirs(execs, clients, true)}
+                    <button onClick={() => { pullGh(true); pushDirs(execs, clients, true); }}
                       className="w-full hair bg-air px-3 py-2 text-xs uppercase tracking-[0.12em] text-black/60 hover:bg-steel">
                       Синхронизировать
                     </button>
 
+                    {/* Локальный сервер — необязательная вторая копия */}
+                    <button onClick={() => setSrvOpen((v) => !v)}
+                      className="w-full text-left text-[11px] font-light text-black/40 hover:text-black/60 pt-1 border-t border-concrete">
+                      {srvOpen ? "— " : "+ "}Сервер на этом компьютере
+                    </button>
+                    {srvOpen ? (
+                      <div className="space-y-3">
+                        <div className="flex items-start gap-2">
+                          <span className={"mt-1 shrink-0 w-2 h-2 " + (SYNC_DOT[sync.state] || "bg-concrete")} />
+                          <span className="text-[11px] font-light text-black/60">{syncText}</span>
+                        </div>
+                        <label className="block">
+                          <span className={F_LB}>Адрес сервера данных</span>
+                          <input value={srvUrl} placeholder={SRV_SELF ? "адрес этой страницы" : SRV_DEFAULT} className={F_IN}
+                            onChange={(e) => { setSrvUrl(e.target.value); srvSaveUrl(e.target.value); }} />
+                        </label>
+                        <label className="block">
+                          <span className={F_LB}>Ключ доступа</span>
+                          <input type="password" value={srvKey} placeholder="если сервер без пароля — оставьте пустым"
+                            className={F_IN}
+                            onChange={(e) => { setSrvKey(e.target.value); srvSaveKey(e.target.value); }} />
+                        </label>
+                      </div>
+                    ) : null}
+
                     <p className="text-[11px] font-light text-black/45">
                       {STORAGE_OK
-                        ? "Копия справочников и черновик лежат в этом браузере — договор готовится и без сети."
-                        : "Браузер запретил локальное хранилище — работают только сервер и кнопка «Экспорт»."}
+                        ? "Копия справочника и черновик лежат в этом браузере — договор готовится и без сети."
+                        : "Браузер запретил локальное хранилище — работают только сайт и кнопка «Экспорт»."}
                     </p>
                     <div className="flex gap-2">
                       <button onClick={exportJson}
